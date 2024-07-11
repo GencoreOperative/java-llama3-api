@@ -49,6 +49,8 @@ public class StdOutUtils {
 
             try {
                 runnable.run();
+                out.flush();
+                error.flush();
             } catch (Exception e) {
                 throw new RuntimeException(format("Failed to execute function: {0}", e.getMessage()), e);
             } finally {
