@@ -1,7 +1,5 @@
-package uk.co.gencoreoperative;
+package org.example;
 
-import java.awt.*;
-import java.awt.TrayIcon.MessageType;
 import java.io.IOException;
 
 import com.sshtools.twoslices.Slice;

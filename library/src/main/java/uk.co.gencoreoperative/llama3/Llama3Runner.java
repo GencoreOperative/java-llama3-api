@@ -9,6 +9,7 @@ import javax.annotation.Nonnull;
 
 import uk.co.gencoreoperative.ai.Run;
 import uk.co.gencoreoperative.utils.StdOutUtils;
+import mukel.Llama3;
 
 /**
  * Based on the excellent work by <a href="https://github.com/mukel/llama3.java>mukel</a>,

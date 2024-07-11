@@ -14,7 +14,7 @@ public class Test {
                 .build()
                 .parse(args);
 
-        String prompt = "1 + 1 = ";
+        String prompt = "What is Weather Code 0?";
         System.out.print(prompt);
         Run runner = new Llama3Runner(config.modelPath);
         System.out.println(runner.run(prompt));

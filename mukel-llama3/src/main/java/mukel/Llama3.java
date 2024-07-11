@@ -1,5 +1,4 @@
-package mukel;
-///usr/bin/env jbang "$0" "$@" ; exit $?
+package mukel;///usr/bin/env jbang "$0" "$@" ; exit $?
 //JAVA 21+
 //PREVIEW
 //COMPILE_OPTIONS --add-modules=jdk.incubator.vector
@@ -353,7 +352,7 @@ final class GGUF {
         // gguf_tensor_info_t tensor_infos[header.tensor_count];
         this.tensorInfos = HashMap.newHashMap(tensorCount);
         for (int i = 0; i < tensorCount; ++i) {
-            GGUF.GGUFTensorInfo ti = readTensorInfo(fileChannel);
+            GGUFTensorInfo ti = readTensorInfo(fileChannel);
             assert !tensorInfos.containsKey(ti.name);
             tensorInfos.put(ti.name, ti);
         }
@@ -377,8 +376,8 @@ final class GGUF {
         Arena arena = Arena.ofAuto();
         this.tensorData = fileChannel.map(FileChannel.MapMode.READ_ONLY, tensorDataOffset, fileChannel.size() - tensorDataOffset, arena);
         this.tensorEntries = HashMap.newHashMap(tensorInfos.size());
-        for (Map.Entry<String, GGUF.GGUFTensorInfo> entry : tensorInfos.entrySet()) {
-            GGUF.GGUFTensorInfo ti = entry.getValue();
+        for (Map.Entry<String, GGUFTensorInfo> entry : tensorInfos.entrySet()) {
+            GGUFTensorInfo ti = entry.getValue();
             int numberOfElements = FloatTensor.numberOfElements(ti.dimensions());
             int sizeInBytes = Math.toIntExact(ti.ggmlType().byteSizeFor(numberOfElements));
             MemorySegment memorySegment = tensorData.asSlice(ti.offset(), sizeInBytes);
@@ -394,7 +393,7 @@ final class GGUF {
         return GGMLType.fromId(ggmlTypeId);
     }
 
-    private GGUF.GGUFTensorInfo readTensorInfo(FileChannel fileChannel) throws IOException {
+    private GGUFTensorInfo readTensorInfo(FileChannel fileChannel) throws IOException {
         // The name of the tensor. It is a standard GGUF string, with the caveat that
         // it must be at most 64 bytes long.
         String name = readString(fileChannel); // gguf_string_t name;
@@ -418,7 +417,7 @@ final class GGUF {
         // Must be a multiple of `ALIGNMENT`.
         long offset = readLong(fileChannel); // uint64_t offset;
         assert offset % getAlignment() == 0;
-        return new GGUF.GGUFTensorInfo(name, dimensions, ggmlType, offset);
+        return new GGUFTensorInfo(name, dimensions, ggmlType, offset);
     }
 
     private String readString(FileChannel fileChannel) throws IOException {
@@ -895,10 +894,10 @@ record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) 
         out.mapWithIndexInPlace(0, size, (value, index) -> weight.get(index) * (finalss * x.getFloat(index)));
     }
 
-    static FloatTensor forward(Llama model, Llama.State state, int token, int position) {
+    static FloatTensor forward(Llama model, State state, int token, int position) {
         // a few convenience variables
-        Llama.Configuration config = model.configuration();
-        Llama.Weights weights = model.weights();
+        Configuration config = model.configuration();
+        Weights weights = model.weights();
         int dim = config.dim;
         int headSize = config.headSize;
         int kvDim = (config.dim * config.numberOfKeyValueHeads) / config.numberOfHeads;
@@ -1038,7 +1037,7 @@ record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) 
      * @param onTokenGenerated callback, if non-null, it's called every time a token is inferred e.g. it's not called when ingesting prompt tokens
      * @return list of generated/inferred tokens, including the stop token, if any e.g. does not include any token from the prompt
      */
-    public static List<Integer> generateTokens(Llama model, Llama.State state, int startPosition, List<Integer> promptTokens, Set<Integer> stopTokens, int maxTokens, Sampler sampler, boolean echo,
+    public static List<Integer> generateTokens(Llama model, State state, int startPosition, List<Integer> promptTokens, Set<Integer> stopTokens, int maxTokens, Sampler sampler, boolean echo,
             IntConsumer onTokenGenerated) {
         long startNanos = System.nanoTime();
         if (maxTokens < 0 || model.configuration().contextLength < maxTokens) {
@@ -1528,7 +1527,7 @@ abstract class FloatTensor {
         return mapInPlace(0, size(), mapFunction);
     }
 
-    FloatTensor mapWithIndexInPlace(int thisOffset, int size, FloatTensor.MapWithIndexFunction mapWithIndexFunction) {
+    FloatTensor mapWithIndexInPlace(int thisOffset, int size, MapWithIndexFunction mapWithIndexFunction) {
         int endOffset = thisOffset + size;
         for (int i = thisOffset; i < endOffset; ++i) {
             setFloat(i, mapWithIndexFunction.apply(getFloat(i), i));
@@ -2034,7 +2033,7 @@ class ChatFormat {
         return Set.of(endOfText, endOfTurn);
     }
 
-    public List<Integer> encodeHeader(ChatFormat.Message message) {
+    public List<Integer> encodeHeader(Message message) {
         List<Integer> tokens = new ArrayList<>();
         tokens.add(startHeader);
         tokens.addAll(this.tokenizer.encodeAsList(message.role().name()));
@@ -2043,33 +2042,33 @@ class ChatFormat {
         return tokens;
     }
 
-    public List<Integer> encodeMessage(ChatFormat.Message message) {
+    public List<Integer> encodeMessage(Message message) {
         List<Integer> tokens = this.encodeHeader(message);
         tokens.addAll(this.tokenizer.encodeAsList(message.content().strip()));
         tokens.add(endOfTurn);
         return tokens;
     }
 
-    public List<Integer> encodeDialogPrompt(boolean appendAssistantTurn, List<ChatFormat.Message> dialog) {
+    public List<Integer> encodeDialogPrompt(boolean appendAssistantTurn, List<Message> dialog) {
         List<Integer> tokens = new ArrayList<>();
         tokens.add(beginOfText);
-        for (ChatFormat.Message message : dialog) {
+        for (Message message : dialog) {
             tokens.addAll(this.encodeMessage(message));
         }
         if (appendAssistantTurn) {
             // Add the start of an assistant message for the model to complete.
-            tokens.addAll(this.encodeHeader(new ChatFormat.Message(ChatFormat.Role.ASSISTANT, "")));
+            tokens.addAll(this.encodeHeader(new Message(Role.ASSISTANT, "")));
         }
         return tokens;
     }
 
-    public record Message(ChatFormat.Role role, String content) {
+    public record Message(Role role, String content) {
     }
 
     public record Role(String name) {
-        public static ChatFormat.Role SYSTEM = new ChatFormat.Role("system");
-        public static ChatFormat.Role USER = new ChatFormat.Role("user");
-        public static ChatFormat.Role ASSISTANT = new ChatFormat.Role("assistant");
+        public static Role SYSTEM = new Role("system");
+        public static Role USER = new Role("user");
+        public static Role ASSISTANT = new Role("assistant");
 
         @Override
         public String toString() {

@@ -7,6 +7,13 @@
     <groupId>uk.co.gencoreoperative</groupId>
     <artifactId>java-llama3-api</artifactId>
     <version>1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <modules>
+        <module>weather-test</module>
+        <module>mukel-llama3</module>
+        <module>library</module>
+    </modules>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
@@ -16,28 +23,6 @@
 
     <build>
         <plugins>
-
-            <!-- Add an extra source directory -->
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>build-helper-maven-plugin</artifactId>
-                <version>3.2.0</version>
-                <executions>
-                    <execution>
-                        <id>add-source</id>
-                        <phase>generate-sources</phase>
-                        <goals>
-                            <goal>add-source</goal>
-                        </goals>
-                        <configuration>
-                            <sources>
-                                <source>${basedir}/src/main/java</source>
-                                <source>${basedir}/mukel-llama3</source>
-                            </sources>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
 
             <!-- The compile stage enables access to the preview Vector feature used by Llama3.java -->
             <plugin>
@@ -82,56 +67,13 @@
     </build>
 
     <dependencies>
-        <dependency>
-            <groupId>com.beust</groupId>
-            <artifactId>jcommander</artifactId>
-            <version>1.82</version>
-        </dependency>
 
-        <!-- Unit Test Dependencies -->
-        <dependency>
-            <groupId>org.forgerock.cuppa</groupId>
-            <artifactId>cuppa</artifactId>
-            <version>1.3.1</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.forgerock.cuppa</groupId>
-            <artifactId>cuppa-junit</artifactId>
-            <version>1.3.1</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
-            <version>4.13.1</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.assertj</groupId>
-            <artifactId>assertj-core</artifactId>
-            <version>3.8.0</version>
-        </dependency>
 
-        <!-- Notification test code-->
-        <dependency>
-            <groupId>com.sshtools</groupId>
-            <artifactId>two-slices</artifactId>
-            <version>0.9.3</version>
-        </dependency>
 
-        <!-- Compile time dependencies -->
-        <dependency>
-            <groupId>org.projectlombok</groupId>
-            <artifactId>lombok</artifactId>
-            <version>1.18.20</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.google.code.findbugs</groupId>
-            <artifactId>jsr305</artifactId>
-            <version>3.0.2</version>
-        </dependency>
+
+
+
+
     </dependencies>
 
 </project>
