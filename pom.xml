@@ -88,6 +88,13 @@
             <version>1.82</version>
         </dependency>
 
+        <!-- Notification test code-->
+        <dependency>
+            <groupId>com.sshtools</groupId>
+            <artifactId>two-slices</artifactId>
+            <version>0.9.3</version>
+        </dependency>
+
         <!-- Compile time dependencies -->
         <dependency>
             <groupId>org.projectlombok</groupId>

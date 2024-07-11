@@ -31,4 +31,8 @@ run:
 	  -v "$(shell pwd):/tmp/source":rw \
 	  -w /tmp/source \
 	  $(RUN_IMAGE) \
-	  java --enable-preview --add-modules jdk.incubator.vector -jar target/llama3-api-1.0-SNAPSHOT.jar --model Meta-Llama-3-8B-Instruct-Q4_0.gguf
+	  java \
+	  	--enable-preview \
+	  	--add-modules jdk.incubator.vector \
+	  	-jar target/llama3-api-1.0-SNAPSHOT.jar \
+	  		--model Meta-Llama-3-8B-Instruct-Q4_0.gguf
