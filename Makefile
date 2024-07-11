@@ -26,7 +26,7 @@ clean:
 	  $(DOCKER_IMAGE) \
 	  mvn clean
 
-run:
+test:
 	docker run -it --rm \
 	  -v "$(shell pwd):/tmp/source":rw \
 	  -w /tmp/source \
@@ -34,5 +34,16 @@ run:
 	  java \
 	  	--enable-preview \
 	  	--add-modules jdk.incubator.vector \
-	  	-jar target/llama3-api-1.0-SNAPSHOT.jar \
+	  	-jar api/target/api-1.0-SNAPSHOT.jar \
 	  		--model Meta-Llama-3-8B-Instruct-Q4_0.gguf
+
+weather:
+	docker run -it --rm \
+	  -v "$(shell pwd):/tmp/source":rw \
+	  -w /tmp/source \
+	  $(RUN_IMAGE) \
+	  java \
+	  	--enable-preview \
+	  	--add-modules jdk.incubator.vector \
+	  	-cp weather-test/target/weather-test-1.0-SNAPSHOT.jar \
+		org.example.WeatherTest

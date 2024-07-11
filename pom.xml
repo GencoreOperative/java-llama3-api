@@ -12,7 +12,7 @@
     <modules>
         <module>weather-test</module>
         <module>mukel-llama3</module>
-        <module>library</module>
+        <module>api</module>
     </modules>
 
     <properties>
@@ -65,15 +65,5 @@
             </plugin>
         </plugins>
     </build>
-
-    <dependencies>
-
-
-
-
-
-
-
-    </dependencies>
 
 </project>
