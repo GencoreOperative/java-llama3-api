@@ -14,6 +14,7 @@ public class Test {
                 .parse(args);
 
         String prompt = "1 + 1 = ";
+        System.out.print(prompt);
         System.out.println(new Llama3Runner(config.modelPath).run(prompt));
     }
 }
