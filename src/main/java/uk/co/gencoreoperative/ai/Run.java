@@ -9,7 +9,7 @@ public interface Run {
     /**
      * Perform a single AI request with the provided prompt.
      * @param prompt A non-null, possibly empty prompt.
-     * @throws Exception If there was an error performing the request.
+     * @throws RuntimeException If there was an error performing the request.
      */
-    String run(@Nonnull String prompt) throws Exception;
+    String run(@Nonnull String prompt) throws RuntimeException;
 }

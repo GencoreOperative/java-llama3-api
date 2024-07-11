@@ -51,6 +51,36 @@ This will output the following:
 1 + 1 = 2
 ```
 
+## Development with the Library
+
+In order to use the library, we will need to include this code in our project. The simplest way to do this is to
+install the library into your local Maven repository:
+
+```commandline
+mvn install
+```
+
+Then, in your project, you can include the library as a dependency:
+
+```xml
+<dependency>
+    <groupId>uk.co.gencoreoperative</groupId>
+    <artifactId>java-llama3-api</artifactId>
+    <version>1.0-SNAPSHOT</version>
+</dependency>
+```
+
+Lastly, you need to have available the Llama3 Model file. This is a large file and is not included in this project but
+can be downloaded from [here](https://huggingface.co/mukel/Meta-Llama-3-8B-Instruct-GGUF).
+
+The following example code shows how you might invoke the library:
+```java
+String prompt = "your prompt here";
+Path modelPath = "path to model file here";
+Run runner = new Llama3Runner(modelPath);
+System.out.println(runner.run(prompt));
+```
+
 ## License
 
 This project is licensed under the same license as the Llama3.java project, MIT License - see the 
