@@ -1,19 +1,20 @@
-package mukel;///usr/bin/env jbang "$0" "$@" ; exit $?
+package mukel;
+///usr/bin/env jbang "$0" "$@" ; exit $?
 //JAVA 21+
 //PREVIEW
 //COMPILE_OPTIONS --add-modules=jdk.incubator.vector
 //RUNTIME_OPTIONS --add-modules=jdk.incubator.vector
 
-// Practical mukel.Llama 3 inference in a single Java file
+// Practical Llama 3 inference in a single Java file
 // Author: Alfonso² Peterssen
 // Based on Andrej Karpathy's llama2.c and minbpe projects
 //
-// Supports llama.cpp's mukel.GGUF format, restricted to Q4_0 and Q8_0 quantized models
+// Supports llama.cpp's GGUF format, restricted to Q4_0 and Q8_0 quantized models
 // Multi-threaded matrix vector multiplication routines implemented using Java's Vector API
 // Simple CLI with --chat and --instruct mode
 //
 // To run just:
-// jbang mukel.Llama3.java --help
+// jbang Llama3.java --help
 //
 // Enjoy!
 
@@ -48,7 +49,7 @@ import java.util.stream.Stream;
 
 public class Llama3 {
 
-    public static Sampler selectSampler(int vocabularySize, float temperature, float topp, long rngSeed) {
+    static Sampler selectSampler(int vocabularySize, float temperature, float topp, long rngSeed) {
         Sampler sampler;
         if (temperature == 0.0f) {
             // greedy argmax sampling: take the token with the highest probability
@@ -124,7 +125,7 @@ public class Llama3 {
         }
     }
 
-    public static void runInstructOnce(Llama model, Sampler sampler, Options options) {
+    static void runInstructOnce(Llama model, Sampler sampler, Options options) {
         Llama.State state = model.createNewState();
         ChatFormat chatFormat = new ChatFormat(model.tokenizer());
 
@@ -150,6 +151,102 @@ public class Llama3 {
         if (!options.stream()) {
             String responseText = model.tokenizer().decode(responseTokens);
             System.out.println(responseText);
+        }
+    }
+
+    record Options(Path modelPath, String prompt, String systemPrompt, boolean interactive,
+                   float temperature, float topp, long seed, int maxTokens, boolean stream, boolean echo) {
+
+        Options {
+            require(modelPath != null, "Missing argument: --model <path> is required");
+            require(interactive || prompt != null, "Missing argument: --prompt is required in --instruct mode e.g. --prompt \"Why is the sky blue?\"");
+            require(0 <= temperature, "Invalid argument: --temperature must be non-negative");
+            require(0 <= topp && topp <= 1, "Invalid argument: --top-p must be within [0, 1]");
+        }
+
+        static void require(boolean condition, String messageFormat, Object... args) {
+            if (!condition) {
+                System.out.println("ERROR " + messageFormat.formatted(args));
+                System.out.println();
+                printUsage(System.out);
+                System.exit(-1);
+            }
+        }
+
+        static void printUsage(PrintStream out) {
+            out.println("Usage:  jbang Llama3.java [options]");
+            out.println();
+            out.println("Options:");
+            out.println("  --model, -m <path>            required, path to .gguf file");
+            out.println("  --interactive, --chat, -i     run in chat mode");
+            out.println("  --instruct                    run in instruct (once) mode, default mode");
+            out.println("  --prompt, -p <string>         input prompt");
+            out.println("  --system-prompt, -sp <string> (optional) system prompt");
+            out.println("  --temperature, -temp <float>  temperature in [0,inf], default 0.1");
+            out.println("  --top-p <float>               p value in top-p (nucleus) sampling in [0,1] default 0.95");
+            out.println("  --seed <long>                 random seed, default System.nanoTime()");
+            out.println("  --max-tokens, -n <int>        number of steps to run for < 0 = limited by context length, default 512");
+            out.println("  --stream <boolean>            print tokens during generation; may cause encoding artifacts for non ASCII text, default true");
+            out.println("  --echo <boolean>              print ALL tokens to stderr, if true, recommended to set --stream=false, default false");
+            out.println();
+            out.println("Examples:");
+            out.println("  jbang Llama3.java --model llama3-8b-q4_0.gguf --prompt \"Tell me a joke\"");
+            out.println("  jbang Llama3.java --model llama3-8b-q4_0.gguf --system-prompt \"Reply concisely, in French\" --prompt \"Who was Marie Curie?\"");
+            out.println("  jbang Llama3.java --model llama3-8b-q4_0.gguf --system-prompt \"Answer concisely\" --chat");
+            out.println("  jbang Llama3.java --model llama3-8b-q4_0.gguf --chat");
+            out.println("  jbang Llama3.java --model llama3-8b-q4_0.gguf --prompt \"Print 5 emojis\" --stream=false");
+        }
+
+        static Options parseOptions(String[] args) {
+            String prompt = null;
+            String systemPrompt = null;
+            float temperature = 0.1f;
+            float topp = 0.95f;
+            Path modelPath = null;
+            long seed = System.nanoTime();
+            // Keep max context length small for low-memory devices.
+            int maxTokens = 512;
+            boolean interactive = false;
+            boolean stream = true;
+            boolean echo = false;
+
+            for (int i = 0; i < args.length; i++) {
+                String optionName = args[i];
+                require(optionName.startsWith("-"), "Invalid option %s", optionName);
+                switch (optionName) {
+                case "--interactive", "--chat", "-i" -> interactive = true;
+                case "--instruct" -> interactive = false;
+                case "--help", "-h" -> {
+                    printUsage(System.out);
+                    System.exit(0);
+                }
+                default -> {
+                    String nextArg;
+                    if (optionName.contains("=")) {
+                        String[] parts = optionName.split("=", 2);
+                        optionName = parts[0];
+                        nextArg = parts[1];
+                    } else {
+                        require(i + 1 < args.length, "Missing argument for option %s", optionName);
+                        nextArg = args[i + 1];
+                        i += 1; // skip arg
+                    }
+                    switch (optionName) {
+                    case "--prompt", "-p" -> prompt = nextArg;
+                    case "--system-prompt", "-sp" -> systemPrompt = nextArg;
+                    case "--temperature", "--temp" -> temperature = Float.parseFloat(nextArg);
+                    case "--top-p" -> topp = Float.parseFloat(nextArg);
+                    case "--model", "-m" -> modelPath = Paths.get(nextArg);
+                    case "--seed", "-s" -> seed = Long.parseLong(nextArg);
+                    case "--max-tokens", "-n" -> maxTokens = Integer.parseInt(nextArg);
+                    case "--stream" -> stream = Boolean.parseBoolean(nextArg);
+                    case "--echo" -> echo = Boolean.parseBoolean(nextArg);
+                    default -> require(false, "Unknown option: %s", optionName);
+                    }
+                }
+                }
+            }
+            return new Options(modelPath, prompt, systemPrompt, interactive, temperature, topp, seed, maxTokens, stream, echo);
         }
     }
 
@@ -298,7 +395,7 @@ final class GGUF {
     }
 
     private GGUF.GGUFTensorInfo readTensorInfo(FileChannel fileChannel) throws IOException {
-        // The name of the tensor. It is a standard mukel.GGUF string, with the caveat that
+        // The name of the tensor. It is a standard GGUF string, with the caveat that
         // it must be at most 64 bytes long.
         String name = readString(fileChannel); // gguf_string_t name;
         assert name.length() <= 64;
@@ -325,7 +422,7 @@ final class GGUF {
     }
 
     private String readString(FileChannel fileChannel) throws IOException {
-        // A string in mukel.GGUF.
+        // A string in GGUF.
         // The length of the string, in bytes.
         int len = Math.toIntExact(readLong(fileChannel)); // uint64_t len;
         // The string as a UTF-8 non-null-terminated string.
@@ -336,7 +433,7 @@ final class GGUF {
     }
 
     private Pair<String, Object> readKeyValuePair(FileChannel fileChannel) throws IOException {
-        // The key of the metadata. It is a standard mukel.GGUF string, with the following caveats:
+        // The key of the metadata. It is a standard GGUF string, with the following caveats:
         // - It must be a valid ASCII string.
         // - It must be a hierarchical key, where each segment is `lower_snake_case` and separated by a `.`.
         // - It must be at most 2^16-1/65535 bytes long.
@@ -357,8 +454,8 @@ final class GGUF {
     }
 
     void readHeader(FileChannel fileChannel) throws IOException {
-        // Magic number to announce that this is a mukel.GGUF file.
-        // Must be `mukel.GGUF` at the byte level: `0x47` `0x47` `0x55` `0x46`.
+        // Magic number to announce that this is a GGUF file.
+        // Must be `GGUF` at the byte level: `0x47` `0x47` `0x55` `0x46`.
         // Your executor might do little-endian byte order, so it might be
         // check for 0x46554747 and letting the endianness cancel out.
         // Consider being *very* explicit about the byte order here.
@@ -400,56 +497,56 @@ final class GGUF {
         // The array of values.
         // gguf_metadata_value_t array[len];
         switch (value_type) {
-            case UINT8, INT8 -> {
-                byte[] bytes = new byte[len];
-                for (int i = 0; i < len; ++i) {
-                    bytes[i] = readByte(fileChannel);
-                }
-                return bytes;
+        case UINT8, INT8 -> {
+            byte[] bytes = new byte[len];
+            for (int i = 0; i < len; ++i) {
+                bytes[i] = readByte(fileChannel);
             }
-            case UINT16, INT16 -> {
-                short[] shorts = new short[len];
-                for (int i = 0; i < len; ++i) {
-                    shorts[i] = readShort(fileChannel);
-                }
-                return shorts;
+            return bytes;
+        }
+        case UINT16, INT16 -> {
+            short[] shorts = new short[len];
+            for (int i = 0; i < len; ++i) {
+                shorts[i] = readShort(fileChannel);
             }
-            case UINT32, INT32 -> {
-                int[] ints = new int[len];
-                for (int i = 0; i < len; ++i) {
-                    ints[i] = readInt(fileChannel);
-                }
-                return ints;
+            return shorts;
+        }
+        case UINT32, INT32 -> {
+            int[] ints = new int[len];
+            for (int i = 0; i < len; ++i) {
+                ints[i] = readInt(fileChannel);
             }
-            case FLOAT32 -> {
-                float[] floats = new float[len];
-                for (int i = 0; i < len; ++i) {
-                    floats[i] = readFloat(fileChannel);
-                }
-                return floats;
+            return ints;
+        }
+        case FLOAT32 -> {
+            float[] floats = new float[len];
+            for (int i = 0; i < len; ++i) {
+                floats[i] = readFloat(fileChannel);
             }
-            case BOOL -> {
-                boolean[] booleans = new boolean[len];
-                for (int i = 0; i < len; ++i) {
-                    booleans[i] = readBoolean(fileChannel);
-                }
-                return booleans;
+            return floats;
+        }
+        case BOOL -> {
+            boolean[] booleans = new boolean[len];
+            for (int i = 0; i < len; ++i) {
+                booleans[i] = readBoolean(fileChannel);
             }
-            case STRING -> {
-                String[] strings = new String[len];
-                for (int i = 0; i < len; ++i) {
-                    strings[i] = readString(fileChannel);
-                }
-                return strings;
+            return booleans;
+        }
+        case STRING -> {
+            String[] strings = new String[len];
+            for (int i = 0; i < len; ++i) {
+                strings[i] = readString(fileChannel);
             }
-            case ARRAY -> {
-                Object[] arrays = new Object[len];
-                for (int i = 0; i < len; ++i) {
-                    arrays[i] = readArray(fileChannel);
-                }
-                return arrays;
+            return strings;
+        }
+        case ARRAY -> {
+            Object[] arrays = new Object[len];
+            for (int i = 0; i < len; ++i) {
+                arrays[i] = readArray(fileChannel);
             }
-            default -> throw new UnsupportedOperationException("read array of " + value_type);
+            return arrays;
+        }
+        default -> throw new UnsupportedOperationException("read array of " + value_type);
         }
     }
 
@@ -541,12 +638,452 @@ interface Timer extends AutoCloseable {
     }
 }
 
+final class ModelLoader {
+    private static final String TOKENIZER_LLAMA_3_MODEL = "gpt2";
 
+    private static final String LLAMA_3_PATTERN = "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+";
 
+    private static Vocabulary loadVocabulary(Map<String, Object> metadata) {
+        String model = (String) metadata.get("tokenizer.ggml.model");
+        if (!TOKENIZER_LLAMA_3_MODEL.equals(model)) {
+            throw new IllegalArgumentException("expected " + TOKENIZER_LLAMA_3_MODEL + " but found " + model);
+        }
+        String[] tokens = (String[]) metadata.get("tokenizer.ggml.tokens");
+        return new Vocabulary(tokens, null);
+    }
 
+    public static Llama loadModel(Path ggufPath, int contextLength) throws IOException {
+        try (var ignored = Timer.log("Load LlaMa model")) {
+            GGUF gguf = GGUF.loadModel(ggufPath);
+            Map<String, Object> metadata = gguf.getMetadata();
+
+            Vocabulary vocabulary = loadVocabulary(metadata);
+            Tokenizer tokenizer = createTokenizer(metadata, vocabulary);
+
+            int modelContextLength = (int) metadata.get("llama.context_length");
+            if (contextLength < 0 || modelContextLength < contextLength) {
+                contextLength = modelContextLength;
+            }
+
+            Llama.Configuration config = new Llama.Configuration(
+                    (int) metadata.get("llama.embedding_length"),
+                    (int) metadata.get("llama.feed_forward_length"),
+                    (int) metadata.get("llama.block_count"),
+                    (int) metadata.get("llama.attention.head_count"),
+
+                    metadata.containsKey("llama.attention.head_count_kv")
+                            ? (int) metadata.get("llama.attention.head_count_kv")
+                            : (int) metadata.get("llama.attention.head_count"),
+
+                    vocabulary.size(),
+                    contextLength,
+                    false,
+                    (float) metadata.getOrDefault("llama.attention.layer_norm_rms_epsilon", 1e-5f),
+                    (float) metadata.getOrDefault("llama.rope.freq_base", 10000f)
+            );
+
+            Map<String, GGMLTensorEntry> tensorEntries = gguf.getTensorEntries();
+
+            Pair<float[], float[]> ropeFreqs = RoPE.precomputeFreqsCis(config.contextLength, config.headSize, config.ropeTheta);
+            float[] ropeFreqsReal = ropeFreqs.first();
+            float[] ropeFreqsImag = ropeFreqs.second();
+
+            Llama.Weights qw = new Llama.Weights(
+                    loadQuantized(tensorEntries.get("token_embd.weight")),
+                    loadArrayOfFloatBuffer(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_norm.weight")),
+                    loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_q.weight")),
+                    loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_k.weight")),
+                    loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_v.weight")),
+                    loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_output.weight")),
+                    loadArrayOfFloatBuffer(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".ffn_norm.weight")),
+                    loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".ffn_gate.weight")), // w1
+                    loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".ffn_down.weight")), // w2
+                    loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".ffn_up.weight")), // w3
+                    toFloatBuffer(tensorEntries.get("output_norm.weight")),
+                    FloatBuffer.wrap(ropeFreqsReal),
+                    FloatBuffer.wrap(ropeFreqsImag),
+                    loadQuantized(tensorEntries.get("output.weight"))
+            );
+
+            return new Llama(config, tokenizer, qw);
+        }
+    }
+
+    private static Tokenizer createTokenizer(Map<String, Object> metadata, Vocabulary vocabulary) {
+        String[] mergeLines = (String[]) metadata.get("tokenizer.ggml.merges");
+        List<Pair<Integer, Integer>> merges = Arrays.stream(mergeLines)
+                .map(line -> line.split(" "))
+                .map(parts ->
+                        new Pair<>(
+                                vocabulary.getIndex(parts[0]).orElseThrow(),
+                                vocabulary.getIndex(parts[1]).orElseThrow())
+                ).toList();
+
+        int allTokens = vocabulary.size();
+        int baseTokens = 128000; // assume all tokens after the base ones are special.
+        int reservedSpecialTokens = allTokens - baseTokens;
+        List<String> specialTokensList = Arrays.stream(vocabulary.tokens(), baseTokens, allTokens).toList();
+
+        assert specialTokensList.stream().allMatch(token -> vocabulary.getIndex(token).isPresent());
+
+        Map<String, Integer> specialTokens =
+                IntStream.range(0, specialTokensList.size())
+                        .boxed()
+                        .collect(Collectors.toMap(
+                                i -> specialTokensList.get(i),
+                                i -> baseTokens + i)
+                        );
+
+        return new Tokenizer(vocabulary, merges, LLAMA_3_PATTERN, specialTokens);
+    }
+
+    public static FloatTensor loadQuantized(GGMLTensorEntry entry) {
+        GGMLType ggmlType = entry.ggmlType();
+        return switch (ggmlType) {
+            //case F32 -> new F32FloatTensor(FloatTensor.numberOfElements(entry.shape()), entry.memorySegment());
+            case Q8_0 -> new Q8_0FloatTensor(FloatTensor.numberOfElements(entry.shape()), entry.memorySegment());
+            case Q4_0 -> new Q4_0FloatTensor(FloatTensor.numberOfElements(entry.shape()), entry.memorySegment());
+            default -> throw new UnsupportedOperationException("Quantization format " + ggmlType);
+        };
+    }
+
+    public static FloatTensor[] loadArrayOfQuantized(int size, IntFunction<GGMLTensorEntry> getTensorEntry) {
+        FloatTensor[] array = new FloatTensor[size];
+        for (int i = 0; i < size; i++) {
+            array[i] = loadQuantized(getTensorEntry.apply(i));
+        }
+        return array;
+    }
+
+    public static FloatBuffer[] loadArrayOfFloatBuffer(int size, IntFunction<GGMLTensorEntry> getTensorEntry) {
+        FloatBuffer[] array = new FloatBuffer[size];
+        for (int i = 0; i < size; i++) {
+            array[i] = toFloatBuffer(getTensorEntry.apply(i));
+        }
+        return array;
+    }
+
+    public static FloatBuffer toFloatBuffer(GGMLTensorEntry tensorEntry) {
+        GGMLType ggmlType = tensorEntry.ggmlType();
+        return switch (ggmlType) {
+            case F32 -> tensorEntry.memorySegment().asByteBuffer().order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer();
+            default -> throw new UnsupportedOperationException("Conversion to " + ggmlType);
+        };
+    }
+}
+
+record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) {
+    public State createNewState() {
+        State state = new State(configuration());
+        state.latestToken = tokenizer.getSpecialTokens().get("<|begin_of_text|>");
+        return state;
+    }
+
+    public static final class Configuration {
+        public final int dim; // transformer dimension
+        public final int hiddenDim; // for ffn layers
+        public final int numberOfLayers; // number of layers
+        public final int numberOfHeads; // number of query heads
+        public final int numberOfKeyValueHeads; // number of key/value heads (can be < query heads because of multiquery)
+        public final int vocabularySize; // vocabulary size, usually 256 (byte-level)
+        public final int contextLength; // max sequence length
+        public final boolean sharedWeights;
+        public final float rmsNormEps;
+        public final float ropeTheta;
+        public final int headSize;
+
+        public Configuration(int dim, int hiddenDim, int numberOfLayers, int numberOfHeads, int numberOfKeyValueHeads, int vocabularySize, int contextLength, boolean sharedWeights, float rmsNormEps, float ropeTheta) {
+            this.dim = dim;
+            this.hiddenDim = hiddenDim;
+            this.numberOfLayers = numberOfLayers;
+            this.numberOfHeads = numberOfHeads;
+            this.numberOfKeyValueHeads = numberOfKeyValueHeads;
+            this.vocabularySize = vocabularySize;
+            this.contextLength = contextLength;
+            this.sharedWeights = sharedWeights;
+            this.rmsNormEps = rmsNormEps;
+            this.ropeTheta = ropeTheta;
+            this.headSize = dim / numberOfHeads;
+        }
+    }
+
+    public static final class Weights {
+        // token embedding table
+        public final FloatTensor token_embedding_table; // (vocab_size, dim)
+        // weights for rmsnorms
+        public final FloatBuffer[] rms_att_weight; // (layer, dim) rmsnorm weights
+        // weights for matmuls
+        public final FloatTensor[] wq; // (layer, n_heads * head_size)
+        public final FloatTensor[] wk; // (layer, n_kv_heads, head_size)
+        public final FloatTensor[] wv; // (layer, n_kv_heads * head_size)
+        public final FloatTensor[] wo; // (layer, n_heads * head_size, dim)
+        public final FloatBuffer[] rms_ffn_weight; // (layer, dim)
+        // weights for ffn
+        public final FloatTensor[] w1; // (layer, hidden_dim, dim)
+        public final FloatTensor[] w2; // (layer, dim, hidden_dim)
+        public final FloatTensor[] w3; // (layer, hidden_dim, dim)
+        // public final rmsnorm
+        public final FloatBuffer rms_final_weight; // (dim,)
+        // freq_cis for RoPE relatively positional embeddings
+        public final FloatBuffer freq_cis_real; // (seq_len, head_size/2)
+        public final FloatBuffer freq_cis_imag; // (seq_len, head_size/2)
+        // (optional) classifier weights for the logits, on the last layer
+        public final FloatTensor wcls; // (vocab_size, dim)
+
+        public Weights(FloatTensor token_embedding_table, FloatBuffer[] rms_att_weight, FloatTensor[] wq, FloatTensor[] wk, FloatTensor[] wv, FloatTensor[] wo, FloatBuffer[] rms_ffn_weight, FloatTensor[] w1, FloatTensor[] w2, FloatTensor[] w3, FloatBuffer rms_final_weight, FloatBuffer freq_cis_real, FloatBuffer freq_cis_imag, FloatTensor wcls) {
+            this.token_embedding_table = token_embedding_table;
+            this.rms_att_weight = rms_att_weight;
+            this.wq = wq;
+            this.wk = wk;
+            this.wv = wv;
+            this.wo = wo;
+            this.rms_ffn_weight = rms_ffn_weight;
+            this.w1 = w1;
+            this.w2 = w2;
+            this.w3 = w3;
+            this.rms_final_weight = rms_final_weight;
+            this.freq_cis_real = freq_cis_real;
+            this.freq_cis_imag = freq_cis_imag;
+            this.wcls = wcls;
+        }
+    }
+
+    public static final class State {
+
+        // current wave of activations
+        public final FloatTensor x; // activation at current time stamp (dim,)
+        public final FloatTensor xb; // same, but inside a residual branch (dim,)
+        public final FloatTensor xb2; // an additional buffer just for convenience (dim,)
+        public final FloatTensor hb; // buffer for hidden dimension in the ffn (hidden_dim,)
+        public final FloatTensor hb2; // buffer for hidden dimension in the ffn (hidden_dim,)
+        public final FloatTensor q; // query (dim,)
+        public final FloatTensor k; // key (dim,)
+        public final FloatTensor v; // value (dim,)
+        public final FloatTensor att; // buffer for scores/attention values (n_heads, seq_len)
+        public final FloatTensor logits; // output logits
+        // kv cache
+        public final FloatTensor[] keyCache;   // (n_layer, seq_len, kv_dim)
+        public final FloatTensor[] valueCache; // (n_layer, seq_len, kv_dim)
+
+        public int latestToken;
+
+        State(Configuration config) {
+            this.x = ArrayFloatTensor.allocate(config.dim);
+            this.xb = ArrayFloatTensor.allocate(config.dim);
+            this.xb2 = ArrayFloatTensor.allocate(config.dim);
+            this.hb = ArrayFloatTensor.allocate(config.hiddenDim);
+            this.hb2 = ArrayFloatTensor.allocate(config.hiddenDim);
+            this.q = ArrayFloatTensor.allocate(config.dim);
+            this.k = ArrayFloatTensor.allocate(config.dim);
+            this.v = ArrayFloatTensor.allocate(config.dim);
+            this.att = ArrayFloatTensor.allocate(config.numberOfHeads, config.contextLength);
+            this.logits = ArrayFloatTensor.allocate(config.vocabularySize);
+            int kvDim = (config.dim * config.numberOfKeyValueHeads) / config.numberOfHeads;
+            this.keyCache = Stream.generate(() -> ArrayFloatTensor.allocate(config.contextLength, kvDim)).limit(config.numberOfLayers).toArray(FloatTensor[]::new);
+            this.valueCache = Stream.generate(() -> ArrayFloatTensor.allocate(config.contextLength, kvDim)).limit(config.numberOfLayers).toArray(FloatTensor[]::new);
+        }
+    }
+
+    static void rmsnorm(FloatTensor out, FloatTensor x, FloatBuffer weight, int size, float rmsNormEps) {
+        // calculate sum of squares
+        float ss = x.reduce(0, size, 0f, (acc, xi) -> acc + xi * xi);
+        ss /= size;
+        ss += rmsNormEps;
+        ss = (float) (1.0 / Math.sqrt(ss));
+        // normalize and scale
+        final float finalss = ss; // for the lambda
+        out.mapWithIndexInPlace(0, size, (value, index) -> weight.get(index) * (finalss * x.getFloat(index)));
+    }
+
+    static FloatTensor forward(Llama model, Llama.State state, int token, int position) {
+        // a few convenience variables
+        Llama.Configuration config = model.configuration();
+        Llama.Weights weights = model.weights();
+        int dim = config.dim;
+        int headSize = config.headSize;
+        int kvDim = (config.dim * config.numberOfKeyValueHeads) / config.numberOfHeads;
+        int kvMul = config.numberOfHeads / config.numberOfKeyValueHeads; // integer multiplier of the kv sharing in multiquery
+        float sqrtHeadSize = (float) Math.sqrt(headSize);
+
+        // copy the token embedding into x
+        weights.token_embedding_table.copyTo(token * dim, state.x, 0, dim);
+
+        // forward all the layers
+        for (int l = 0; l < config.numberOfLayers; l++) {
+            // attention rmsnorm
+            rmsnorm(state.xb, state.x, weights.rms_att_weight[l], dim, config.rmsNormEps);
+
+            // qkv matmuls for this position
+            weights.wq[l].matmul(state.xb, state.q, dim, dim);
+            weights.wk[l].matmul(state.xb, state.k, kvDim, dim);
+            weights.wv[l].matmul(state.xb, state.v, kvDim, dim);
+
+            // RoPE relative positional encoding: complex-valued rotate q and k in each head
+            for (int i = 0; i < dim; i += 2) {
+                int head_dim = i % headSize;
+                float fcr = weights.freq_cis_real.get(position * (headSize / 2) + (head_dim / 2));
+                float fci = weights.freq_cis_imag.get(position * (headSize / 2) + (head_dim / 2));
+                int rotn = i < kvDim ? 2 : 1; // how many vectors? 2 = q & k, 1 = q only
+                for (int v = 0; v < rotn; v++) {
+                    FloatTensor vec = v == 0 ? state.q : state.k; // the vector to rotate (query or key)
+                    float v0 = vec.getFloat(i);
+                    float v1 = vec.getFloat(i + 1);
+                    vec.setFloat(i, v0 * fcr - v1 * fci);
+                    vec.setFloat(i + 1, v0 * fci + v1 * fcr);
+                }
+            }
+
+            // save key,value at this time step (position) to our kv cache
+            //int loff = l * config.seq_len * kvDim; // kv cache layer offset for convenience
+            state.k.copyTo(0, state.keyCache[l], position * kvDim, kvDim);
+            state.v.copyTo(0, state.valueCache[l], position * kvDim, kvDim);
+
+            int curLayer = l;
+
+            // multihead attention. iterate over all heads
+            Parallel.parallelFor(0, config.numberOfHeads, h -> {
+                // get the query vector for this head
+                // float* q = s.q + h * headSize;
+                int qOffset = h * headSize;
+
+                // attention scores for this head
+                // float* att = s.att + h * config.seq_len;
+                int attOffset = h * config.contextLength;
+
+                // iterate over all timesteps, including the current one
+                for (int t = 0; t <= position; t++) {
+                    // get the key vector for this head and at this timestep
+                    // float* k = s.key_cache + loff + t * dim + h * headSize;
+                    int keyCacheOffset = /* loff + */ t * kvDim + (h / kvMul) * headSize;
+                    // calculate the attention score as the dot product of q and k
+                    float score = state.q.dot(qOffset, state.keyCache[curLayer], keyCacheOffset, headSize);
+                    score /= sqrtHeadSize;
+                    // save the score to the attention buffer
+                    state.att.setFloat(attOffset + t, score);
+                }
+
+                // softmax the scores to get attention weights, from 0..position inclusively
+                state.att.softmaxInPlace(attOffset, position + 1);
+
+                // weighted sum of the values, store back into xb
+                // float* xb = s.xb + h * headSize;
+                int xbOffset = h * headSize;
+                // memset(xb, 0, headSize * sizeof(float));
+                state.xb.fillInPlace(xbOffset, headSize, 0f);
+
+                for (int t = 0; t <= position; t++) {
+                    // get the value vector for this head and at this timestep
+                    // float* v = s.value_cache + loff + t * dim + h * headSize;
+                    int vOffset = /* loff + */ t * kvDim + (h / kvMul) * headSize;
+                    // get the attention weight for this timestep
+                    float a = state.att.getFloat(attOffset + t);
+                    // accumulate the weighted value into xb
+                    state.xb.saxpyInPlace(xbOffset, state.valueCache[curLayer], vOffset, headSize, a);
+                }
+            });
+
+            // final matmul to get the output of the attention
+            weights.wo[l].matmul(state.xb, state.xb2, dim, dim);
+
+            // residual connection back into x
+            state.x.addInPlace(state.xb2);
+
+            // ffn rmsnorm
+            rmsnorm(state.xb, state.x, weights.rms_ffn_weight[l], dim, config.rmsNormEps);
+
+            // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
+            // first calculate self.w1(x) and self.w3(x)
+            weights.w1[l].matmul(state.xb, state.hb, config.hiddenDim, dim);
+            weights.w3[l].matmul(state.xb, state.hb2, config.hiddenDim, dim);
+
+            // SwiGLU non-linearity
+            // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
+            state.hb.mapInPlace(value -> value / (float) (1.0 + Math.exp(-value)));
+
+            // elementwise multiply with w3(x)
+            state.hb.multiplyInPlace(state.hb2);
+
+            // final matmul to get the output of the ffn
+            weights.w2[l].matmul(state.hb, state.xb, dim, config.hiddenDim);
+
+            // residual connection
+            state.x.addInPlace(state.xb);
+        }
+
+        // final rmsnorm
+        rmsnorm(state.x, state.x, weights.rms_final_weight, dim, config.rmsNormEps);
+
+        // classifier into logits
+        weights.wcls.matmul(state.x, state.logits, config.vocabularySize, dim);
+
+        return state.logits;
+    }
+
+    /**
+     * LLM generation entry point, ingest prompt tokens and generates new tokens.
+     *
+     * <p>
+     * All prompt tokens are ingested first, then inference starts, until a stop token is found.
+     * The returned tokens only include generated/inferred tokens.
+     *
+     * @param model            model to run inference (including weights, configuration, tokenizer ...)
+     * @param state            state of the model e.g. key/value caches ... this is mutated by this call
+     * @param startPosition    start prompt ingestion + inference at this position in the context e.g. useful if state was kept across calls (chained generation). 0 implies run with no previous context.
+     * @param promptTokens     prompt tokens to ingest, all the prompt tokens will be ingested, given there's enough capacity left in the context
+     * @param stopTokens       set of tokens that abort generation during inference, stop tokens do not affect prompt ingestion
+     * @param maxTokens        maximum number of tokens (can go up to {@link Configuration#contextLength context length}
+     *                         if this value is negative or greater than {@link Configuration#contextLength context length}
+     * @param sampler          {@link Sampler strategy} used to select tokens
+     * @param echo             debugging flag, prints ALL, prompt and inferred tokens, to {@link System#err stderr}
+     * @param onTokenGenerated callback, if non-null, it's called every time a token is inferred e.g. it's not called when ingesting prompt tokens
+     * @return list of generated/inferred tokens, including the stop token, if any e.g. does not include any token from the prompt
+     */
+    public static List<Integer> generateTokens(Llama model, Llama.State state, int startPosition, List<Integer> promptTokens, Set<Integer> stopTokens, int maxTokens, Sampler sampler, boolean echo,
+            IntConsumer onTokenGenerated) {
+        long startNanos = System.nanoTime();
+        if (maxTokens < 0 || model.configuration().contextLength < maxTokens) {
+            maxTokens = model.configuration().contextLength;
+        }
+        List<Integer> generatedTokens = new ArrayList<>(maxTokens);
+        int token = state.latestToken; // BOS?
+        int nextToken;
+        int promptIndex = 0;
+        for (int position = startPosition; position < maxTokens; ++position) {
+            forward(model, state, token, position);
+            if (promptIndex < promptTokens.size()) {
+                // Force-pick token from prompt.
+                nextToken = promptTokens.get(promptIndex++);
+                if (echo) {
+                    // log prompt token (different color?)
+                    System.err.print(Tokenizer.replaceControlCharacters(model.tokenizer().decode(List.of(nextToken))));
+                }
+            } else {
+                nextToken = sampler.sampleToken(state.logits);
+                if (echo) {
+                    // log inferred token
+                    System.err.print(Tokenizer.replaceControlCharacters(model.tokenizer().decode(List.of(nextToken))));
+                }
+                generatedTokens.add(nextToken);
+                if (onTokenGenerated != null) {
+                    onTokenGenerated.accept(nextToken);
+                }
+                if (stopTokens.contains(nextToken)) {
+                    break;
+                }
+            }
+            state.latestToken = token = nextToken;
+        }
+
+        long elapsedNanos = System.nanoTime() - startNanos;
+        int totalTokens = promptIndex + generatedTokens.size();
+        System.err.printf("%n%.2f tokens/s (%d)%n", totalTokens / (elapsedNanos / 1_000_000_000.0), totalTokens);
+
+        return generatedTokens;
+    }
+}
 
 /**
- * Byte mukel.Pair Encoding tokenizer.
+ * Byte Pair Encoding tokenizer.
  * <p>
  * Based on <a href="https://github.com/karpathy/minbpe">minbpe</a>, algorithmically follows along the
  * <a href="https://github.com/openai/gpt-2/blob/master/src/encoder.py">GPT 2 tokenizer</a>
@@ -1354,6 +1891,12 @@ record Vocabulary(String[] tokens, float[] scores, Map<String, Integer> tokenToI
     }
 }
 
+@FunctionalInterface
+interface Sampler {
+    int sampleToken(FloatTensor logits);
+
+    Sampler ARGMAX = FloatTensor::argmax;
+}
 
 record CategoricalSampler(RandomGenerator rng) implements Sampler {
 
@@ -1462,7 +2005,7 @@ final class ToppSampler implements Sampler {
 }
 
 /**
- * Utility tailored for mukel.Llama 3 instruct prompt format.
+ * Utility tailored for Llama 3 instruct prompt format.
  */
 class ChatFormat {
 
@@ -1534,5 +2077,4 @@ class ChatFormat {
         }
     }
 }
-
 
