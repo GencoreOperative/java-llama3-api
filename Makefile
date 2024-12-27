@@ -14,6 +14,9 @@ build:
 	  $(DOCKER_IMAGE) \
 	  mvn package
 
+publish: build
+	cp api/target/api-1.0-SNAPSHOT.jar api-1.0-SNAPSHOT.jar
+	cp api/target/api-1.0-SNAPSHOT-sources.jar api-1.0-SNAPSHOT-sources.jar
 
 clean:
 	docker run -it --rm \
