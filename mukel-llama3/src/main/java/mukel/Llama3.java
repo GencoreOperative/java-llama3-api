@@ -1,10 +1,11 @@
-package mukel;///usr/bin/env jbang "$0" "$@" ; exit $?
+///usr/bin/env jbang "$0" "$@" ; exit $?
 //JAVA 21+
 //PREVIEW
 //COMPILE_OPTIONS --add-modules=jdk.incubator.vector
-//RUNTIME_OPTIONS --add-modules=jdk.incubator.vector
+//RUNTIME_OPTIONS --add-modules=jdk.incubator.vector -Djdk.incubator.vector.VECTOR_ACCESS_OOB_CHECK=0
+//MAIN com.llama4j.Llama3
 
-// Practical Llama 3 inference in a single Java file
+// Practical Llama 3 (and 3.1) inference in a single Java file
 // Author: Alfonso² Peterssen
 // Based on Andrej Karpathy's llama2.c and minbpe projects
 //
@@ -16,37 +17,43 @@ package mukel;///usr/bin/env jbang "$0" "$@" ; exit $?
 // jbang Llama3.java --help
 //
 // Enjoy!
+package mukel;
 
-import jdk.incubator.vector.ByteVector;
-import jdk.incubator.vector.FloatVector;
-import jdk.incubator.vector.VectorOperators;
-import jdk.incubator.vector.VectorSpecies;
+import jdk.incubator.vector.*;
+import sun.misc.Unsafe;
 
 import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.IntConsumer;
 import java.util.function.IntFunction;
+import java.util.function.LongConsumer;
 import java.util.random.RandomGenerator;
 import java.util.random.RandomGeneratorFactory;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
 public class Llama3 {
+    // Batch-size used in prompt evaluation.
+    private static final int BATCH_SIZE = Integer.getInteger("llama.BatchSize", 16);
 
     static Sampler selectSampler(int vocabularySize, float temperature, float topp, long rngSeed) {
         Sampler sampler;
@@ -85,15 +92,23 @@ public class Llama3 {
         }
         int startPosition = 0;
         Scanner in = new Scanner(System.in);
-        while (true) {
+        loop: while (true) {
             System.out.print("> ");
             System.out.flush();
             String userText = in.nextLine();
-            if (List.of("quit", "exit").contains(userText)) {
-                break;
+            switch (userText) {
+                case "/quit":
+                case "/exit": break loop;
+                case "/context": {
+                    System.out.printf("%d out of %d context tokens used (%d tokens remaining)%n",
+                            conversationTokens.size(),
+                            options.maxTokens(),
+                            options.maxTokens() - conversationTokens.size());
+                    continue;
+                }
             }
             if (state == null) {
-                state = model.createNewState();
+                state = model.createNewState(BATCH_SIZE);
             }
             conversationTokens.addAll(chatFormat.encodeMessage(new ChatFormat.Message(ChatFormat.Role.USER, userText)));
             conversationTokens.addAll(chatFormat.encodeHeader(new ChatFormat.Message(ChatFormat.Role.ASSISTANT, "")));
@@ -125,7 +140,7 @@ public class Llama3 {
     }
 
     static void runInstructOnce(Llama model, Sampler sampler, Options options) {
-        Llama.State state = model.createNewState();
+        Llama.State state = model.createNewState(BATCH_SIZE);
         ChatFormat chatFormat = new ChatFormat(model.tokenizer());
 
         List<Integer> promptTokens = new ArrayList<>();
@@ -156,6 +171,8 @@ public class Llama3 {
     record Options(Path modelPath, String prompt, String systemPrompt, boolean interactive,
                    float temperature, float topp, long seed, int maxTokens, boolean stream, boolean echo) {
 
+        static final int DEFAULT_MAX_TOKENS = 512;
+
         Options {
             require(modelPath != null, "Missing argument: --model <path> is required");
             require(interactive || prompt != null, "Missing argument: --prompt is required in --instruct mode e.g. --prompt \"Why is the sky blue?\"");
@@ -184,16 +201,16 @@ public class Llama3 {
             out.println("  --temperature, -temp <float>  temperature in [0,inf], default 0.1");
             out.println("  --top-p <float>               p value in top-p (nucleus) sampling in [0,1] default 0.95");
             out.println("  --seed <long>                 random seed, default System.nanoTime()");
-            out.println("  --max-tokens, -n <int>        number of steps to run for < 0 = limited by context length, default 512");
+            out.println("  --max-tokens, -n <int>        number of steps to run for < 0 = limited by context length, default " + DEFAULT_MAX_TOKENS);
             out.println("  --stream <boolean>            print tokens during generation; may cause encoding artifacts for non ASCII text, default true");
             out.println("  --echo <boolean>              print ALL tokens to stderr, if true, recommended to set --stream=false, default false");
             out.println();
             out.println("Examples:");
-            out.println("  jbang Llama3.java --model llama3-8b-q4_0.gguf --prompt \"Tell me a joke\"");
-            out.println("  jbang Llama3.java --model llama3-8b-q4_0.gguf --system-prompt \"Reply concisely, in French\" --prompt \"Who was Marie Curie?\"");
-            out.println("  jbang Llama3.java --model llama3-8b-q4_0.gguf --system-prompt \"Answer concisely\" --chat");
-            out.println("  jbang Llama3.java --model llama3-8b-q4_0.gguf --chat");
-            out.println("  jbang Llama3.java --model llama3-8b-q4_0.gguf --prompt \"Print 5 emojis\" --stream=false");
+            out.println("  jbang Llama3.java --model llama3.2-1b-q4_0.gguf --prompt \"Tell me a joke\"");
+            out.println("  jbang Llama3.java --model llama3.2-1b-q4_0.gguf --system-prompt \"Reply concisely, in French\" --prompt \"Who was Marie Curie?\"");
+            out.println("  jbang Llama3.java --model llama3.2-1b-q4_0.gguf --system-prompt \"Answer concisely\" --chat");
+            out.println("  jbang Llama3.java --model llama3.2-1b-q4_0.gguf --chat");
+            out.println("  jbang Llama3.java --model llama3.2-1b-q4_0.gguf --prompt \"Print 5 emojis\" --stream=false");
         }
 
         static Options parseOptions(String[] args) {
@@ -204,7 +221,7 @@ public class Llama3 {
             Path modelPath = null;
             long seed = System.nanoTime();
             // Keep max context length small for low-memory devices.
-            int maxTokens = 512;
+            int maxTokens = DEFAULT_MAX_TOKENS;
             boolean interactive = false;
             boolean stream = true;
             boolean echo = false;
@@ -213,36 +230,36 @@ public class Llama3 {
                 String optionName = args[i];
                 require(optionName.startsWith("-"), "Invalid option %s", optionName);
                 switch (optionName) {
-                case "--interactive", "--chat", "-i" -> interactive = true;
-                case "--instruct" -> interactive = false;
-                case "--help", "-h" -> {
-                    printUsage(System.out);
-                    System.exit(0);
-                }
-                default -> {
-                    String nextArg;
-                    if (optionName.contains("=")) {
-                        String[] parts = optionName.split("=", 2);
-                        optionName = parts[0];
-                        nextArg = parts[1];
-                    } else {
-                        require(i + 1 < args.length, "Missing argument for option %s", optionName);
-                        nextArg = args[i + 1];
-                        i += 1; // skip arg
+                    case "--interactive", "--chat", "-i" -> interactive = true;
+                    case "--instruct" -> interactive = false;
+                    case "--help", "-h" -> {
+                        printUsage(System.out);
+                        System.exit(0);
                     }
-                    switch (optionName) {
-                    case "--prompt", "-p" -> prompt = nextArg;
-                    case "--system-prompt", "-sp" -> systemPrompt = nextArg;
-                    case "--temperature", "--temp" -> temperature = Float.parseFloat(nextArg);
-                    case "--top-p" -> topp = Float.parseFloat(nextArg);
-                    case "--model", "-m" -> modelPath = Paths.get(nextArg);
-                    case "--seed", "-s" -> seed = Long.parseLong(nextArg);
-                    case "--max-tokens", "-n" -> maxTokens = Integer.parseInt(nextArg);
-                    case "--stream" -> stream = Boolean.parseBoolean(nextArg);
-                    case "--echo" -> echo = Boolean.parseBoolean(nextArg);
-                    default -> require(false, "Unknown option: %s", optionName);
+                    default -> {
+                        String nextArg;
+                        if (optionName.contains("=")) {
+                            String[] parts = optionName.split("=", 2);
+                            optionName = parts[0];
+                            nextArg = parts[1];
+                        } else {
+                            require(i + 1 < args.length, "Missing argument for option %s", optionName);
+                            nextArg = args[i + 1];
+                            i += 1; // skip arg
+                        }
+                        switch (optionName) {
+                            case "--prompt", "-p" -> prompt = nextArg;
+                            case "--system-prompt", "-sp" -> systemPrompt = nextArg;
+                            case "--temperature", "--temp" -> temperature = Float.parseFloat(nextArg);
+                            case "--top-p" -> topp = Float.parseFloat(nextArg);
+                            case "--model", "-m" -> modelPath = Paths.get(nextArg);
+                            case "--seed", "-s" -> seed = Long.parseLong(nextArg);
+                            case "--max-tokens", "-n" -> maxTokens = Integer.parseInt(nextArg);
+                            case "--stream" -> stream = Boolean.parseBoolean(nextArg);
+                            case "--echo" -> echo = Boolean.parseBoolean(nextArg);
+                            default -> require(false, "Unknown option: %s", optionName);
+                        }
                     }
-                }
                 }
             }
             return new Options(modelPath, prompt, systemPrompt, interactive, temperature, topp, seed, maxTokens, stream, echo);
@@ -251,7 +268,11 @@ public class Llama3 {
 
     public static void main(String[] args) throws IOException {
         Options options = Options.parseOptions(args);
-        Llama model = ModelLoader.loadModel(options.modelPath(), options.maxTokens());
+        Llama model = AOT.tryUsePreLoaded(options.modelPath(), options.maxTokens());
+        if (model == null) {
+            // No compatible preloaded model found, fallback to fully parse and load the specified file.
+            model = ModelLoader.loadModel(options.modelPath(), options.maxTokens(), true);
+        }
         Sampler sampler = selectSampler(model.configuration().vocabularySize, options.temperature(), options.topp(), options.seed());
         if (options.interactive()) {
             runInteractive(model, sampler, options);
@@ -271,10 +292,18 @@ final class GGUF {
     private int alignment;
     private int metadata_kv_count; // uint64_t
     private Map<String, Object> metadata;
+
+    public Map<String, GGUFTensorInfo> getTensorInfos() {
+        return tensorInfos;
+    }
+
     private Map<String, GGUFTensorInfo> tensorInfos;
+
     private long tensorDataOffset;
-    private MemorySegment tensorData; // memory mapped tensor data
-    private Map<String, GGMLTensorEntry> tensorEntries;
+
+    public long getTensorDataOffset() {
+        return tensorDataOffset;
+    }
 
     public Map<String, Object> getMetadata() {
         return metadata;
@@ -284,10 +313,6 @@ final class GGUF {
     private final ByteBuffer BB_2 = ByteBuffer.allocate(Short.BYTES).order(ByteOrder.LITTLE_ENDIAN);
     private final ByteBuffer BB_4 = ByteBuffer.allocate(Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN);
     private final ByteBuffer BB_8 = ByteBuffer.allocate(Long.BYTES).order(ByteOrder.LITTLE_ENDIAN);
-
-    public Map<String, GGMLTensorEntry> getTensorEntries() {
-        return tensorEntries;
-    }
 
     public static GGUF loadModel(Path modelPath) throws IOException {
         try (FileChannel fileChannel = FileChannel.open(modelPath);
@@ -352,7 +377,7 @@ final class GGUF {
         // gguf_tensor_info_t tensor_infos[header.tensor_count];
         this.tensorInfos = HashMap.newHashMap(tensorCount);
         for (int i = 0; i < tensorCount; ++i) {
-            GGUFTensorInfo ti = readTensorInfo(fileChannel);
+            GGUF.GGUFTensorInfo ti = readTensorInfo(fileChannel);
             assert !tensorInfos.containsKey(ti.name);
             tensorInfos.put(ti.name, ti);
         }
@@ -373,9 +398,12 @@ final class GGUF {
         // should be padded to `ALIGNMENT` bytes.
         // uint8_t tensor_data[];
         this.tensorDataOffset = fileChannel.position();
+    }
+
+    public static Map<String, GGMLTensorEntry> loadTensors(FileChannel fileChannel, long tensorDataOffset, Map<String, GGUFTensorInfo> tensorInfos) throws IOException {
         Arena arena = Arena.ofAuto();
-        this.tensorData = fileChannel.map(FileChannel.MapMode.READ_ONLY, tensorDataOffset, fileChannel.size() - tensorDataOffset, arena);
-        this.tensorEntries = HashMap.newHashMap(tensorInfos.size());
+        MemorySegment tensorData = fileChannel.map(FileChannel.MapMode.READ_ONLY, tensorDataOffset, fileChannel.size() - tensorDataOffset, arena);
+        Map<String, GGMLTensorEntry> tensorEntries = HashMap.newHashMap(tensorInfos.size());
         for (Map.Entry<String, GGUFTensorInfo> entry : tensorInfos.entrySet()) {
             GGUFTensorInfo ti = entry.getValue();
             int numberOfElements = FloatTensor.numberOfElements(ti.dimensions());
@@ -383,6 +411,7 @@ final class GGUF {
             MemorySegment memorySegment = tensorData.asSlice(ti.offset(), sizeInBytes);
             tensorEntries.put(ti.name(), new GGMLTensorEntry(tensorData, ti.name(), ti.ggmlType(), ti.dimensions(), memorySegment));
         }
+        return tensorEntries;
     }
 
     public record GGUFTensorInfo(String name, int[] dimensions, GGMLType ggmlType, long offset) {
@@ -393,7 +422,7 @@ final class GGUF {
         return GGMLType.fromId(ggmlTypeId);
     }
 
-    private GGUFTensorInfo readTensorInfo(FileChannel fileChannel) throws IOException {
+    private GGUF.GGUFTensorInfo readTensorInfo(FileChannel fileChannel) throws IOException {
         // The name of the tensor. It is a standard GGUF string, with the caveat that
         // it must be at most 64 bytes long.
         String name = readString(fileChannel); // gguf_string_t name;
@@ -417,7 +446,7 @@ final class GGUF {
         // Must be a multiple of `ALIGNMENT`.
         long offset = readLong(fileChannel); // uint64_t offset;
         assert offset % getAlignment() == 0;
-        return new GGUFTensorInfo(name, dimensions, ggmlType, offset);
+        return new GGUF.GGUFTensorInfo(name, dimensions, ggmlType, offset);
     }
 
     private String readString(FileChannel fileChannel) throws IOException {
@@ -496,56 +525,56 @@ final class GGUF {
         // The array of values.
         // gguf_metadata_value_t array[len];
         switch (value_type) {
-        case UINT8, INT8 -> {
-            byte[] bytes = new byte[len];
-            for (int i = 0; i < len; ++i) {
-                bytes[i] = readByte(fileChannel);
+            case UINT8, INT8 -> {
+                byte[] bytes = new byte[len];
+                for (int i = 0; i < len; ++i) {
+                    bytes[i] = readByte(fileChannel);
+                }
+                return bytes;
             }
-            return bytes;
-        }
-        case UINT16, INT16 -> {
-            short[] shorts = new short[len];
-            for (int i = 0; i < len; ++i) {
-                shorts[i] = readShort(fileChannel);
+            case UINT16, INT16 -> {
+                short[] shorts = new short[len];
+                for (int i = 0; i < len; ++i) {
+                    shorts[i] = readShort(fileChannel);
+                }
+                return shorts;
             }
-            return shorts;
-        }
-        case UINT32, INT32 -> {
-            int[] ints = new int[len];
-            for (int i = 0; i < len; ++i) {
-                ints[i] = readInt(fileChannel);
+            case UINT32, INT32 -> {
+                int[] ints = new int[len];
+                for (int i = 0; i < len; ++i) {
+                    ints[i] = readInt(fileChannel);
+                }
+                return ints;
             }
-            return ints;
-        }
-        case FLOAT32 -> {
-            float[] floats = new float[len];
-            for (int i = 0; i < len; ++i) {
-                floats[i] = readFloat(fileChannel);
+            case FLOAT32 -> {
+                float[] floats = new float[len];
+                for (int i = 0; i < len; ++i) {
+                    floats[i] = readFloat(fileChannel);
+                }
+                return floats;
             }
-            return floats;
-        }
-        case BOOL -> {
-            boolean[] booleans = new boolean[len];
-            for (int i = 0; i < len; ++i) {
-                booleans[i] = readBoolean(fileChannel);
+            case BOOL -> {
+                boolean[] booleans = new boolean[len];
+                for (int i = 0; i < len; ++i) {
+                    booleans[i] = readBoolean(fileChannel);
+                }
+                return booleans;
             }
-            return booleans;
-        }
-        case STRING -> {
-            String[] strings = new String[len];
-            for (int i = 0; i < len; ++i) {
-                strings[i] = readString(fileChannel);
+            case STRING -> {
+                String[] strings = new String[len];
+                for (int i = 0; i < len; ++i) {
+                    strings[i] = readString(fileChannel);
+                }
+                return strings;
             }
-            return strings;
-        }
-        case ARRAY -> {
-            Object[] arrays = new Object[len];
-            for (int i = 0; i < len; ++i) {
-                arrays[i] = readArray(fileChannel);
+            case ARRAY -> {
+                Object[] arrays = new Object[len];
+                for (int i = 0; i < len; ++i) {
+                    arrays[i] = readArray(fileChannel);
+                }
+                return arrays;
             }
-            return arrays;
-        }
-        default -> throw new UnsupportedOperationException("read array of " + value_type);
+            default -> throw new UnsupportedOperationException("read array of " + value_type);
         }
     }
 
@@ -651,18 +680,17 @@ final class ModelLoader {
         return new Vocabulary(tokens, null);
     }
 
-    public static Llama loadModel(Path ggufPath, int contextLength) throws IOException {
-        try (var ignored = Timer.log("Load LlaMa model")) {
-            GGUF gguf = GGUF.loadModel(ggufPath);
-            Map<String, Object> metadata = gguf.getMetadata();
+    public static Llama loadModel(Path ggufPath, int contextLength, boolean loadWeights) throws IOException {
+        GGUF gguf = GGUF.loadModel(ggufPath);
+        FileChannel fileChannel = FileChannel.open(ggufPath, StandardOpenOption.READ);
+        return loadModel(fileChannel, gguf, contextLength, loadWeights);
+    }
 
+    public static Llama loadModel(FileChannel fileChannel, GGUF gguf, int contextLength, boolean loadWeights) throws IOException {
+        try (var ignored = Timer.log("Load LlaMa model")) {
+            Map<String, Object> metadata = gguf.getMetadata();
             Vocabulary vocabulary = loadVocabulary(metadata);
             Tokenizer tokenizer = createTokenizer(metadata, vocabulary);
-
-            int modelContextLength = (int) metadata.get("llama.context_length");
-            if (contextLength < 0 || modelContextLength < contextLength) {
-                contextLength = modelContextLength;
-            }
 
             Llama.Configuration config = new Llama.Configuration(
                     (int) metadata.get("llama.embedding_length"),
@@ -675,37 +703,52 @@ final class ModelLoader {
                             : (int) metadata.get("llama.attention.head_count"),
 
                     vocabulary.size(),
-                    contextLength,
-                    false,
+                    (int) metadata.get("llama.context_length"),
                     (float) metadata.getOrDefault("llama.attention.layer_norm_rms_epsilon", 1e-5f),
                     (float) metadata.getOrDefault("llama.rope.freq_base", 10000f)
-            );
+            ).withContextLength(contextLength);
 
-            Map<String, GGMLTensorEntry> tensorEntries = gguf.getTensorEntries();
-
-            Pair<float[], float[]> ropeFreqs = RoPE.precomputeFreqsCis(config.contextLength, config.headSize, config.ropeTheta);
-            float[] ropeFreqsReal = ropeFreqs.first();
-            float[] ropeFreqsImag = ropeFreqs.second();
-
-            Llama.Weights qw = new Llama.Weights(
-                    loadQuantized(tensorEntries.get("token_embd.weight")),
-                    loadArrayOfFloatBuffer(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_norm.weight")),
-                    loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_q.weight")),
-                    loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_k.weight")),
-                    loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_v.weight")),
-                    loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_output.weight")),
-                    loadArrayOfFloatBuffer(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".ffn_norm.weight")),
-                    loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".ffn_gate.weight")), // w1
-                    loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".ffn_down.weight")), // w2
-                    loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".ffn_up.weight")), // w3
-                    toFloatBuffer(tensorEntries.get("output_norm.weight")),
-                    FloatBuffer.wrap(ropeFreqsReal),
-                    FloatBuffer.wrap(ropeFreqsImag),
-                    loadQuantized(tensorEntries.get("output.weight"))
-            );
-
-            return new Llama(config, tokenizer, qw);
+            Llama.Weights weights = null;
+            if (loadWeights) {
+                Map<String, GGMLTensorEntry> tensorEntries = GGUF.loadTensors(fileChannel, gguf.getTensorDataOffset(), gguf.getTensorInfos());
+                weights = loadWeights(tensorEntries, config);
+            }
+            return new Llama(config, tokenizer, weights);
         }
+    }
+
+    static Llama.Weights loadWeights(Map<String, GGMLTensorEntry> tensorEntries, Llama.Configuration config) {
+        boolean ropeScaling = tensorEntries.containsKey("rope_freqs");
+        float scaleFactor = 8;
+        float loFreqFactor = 1;
+        float hiFreqFactor = 3;
+        int oldContextLength = 8192;
+        Pair<float[], float[]> ropeFreqs = RoPE.precomputeFreqsCis(config.contextLength, config.headSize, config.ropeTheta,
+                ropeScaling, scaleFactor, loFreqFactor, hiFreqFactor, oldContextLength);
+        float[] ropeFreqsReal = ropeFreqs.first();
+        float[] ropeFreqsImag = ropeFreqs.second();
+
+        GGMLTensorEntry tokenEmbeddings = tensorEntries.get("token_embd.weight");
+        Llama.Weights qw = new Llama.Weights(
+                loadQuantized(tokenEmbeddings),
+                loadArrayOfFloatBuffer(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_norm.weight")),
+                loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_q.weight")),
+                loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_k.weight")),
+                loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_v.weight")),
+                loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".attn_output.weight")),
+                loadArrayOfFloatBuffer(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".ffn_norm.weight")),
+                loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".ffn_gate.weight")), // w1
+                loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".ffn_down.weight")), // w2
+                loadArrayOfQuantized(config.numberOfLayers, i -> tensorEntries.get("blk." + i + ".ffn_up.weight")), // w3
+                toFloatBuffer(tensorEntries.get("output_norm.weight")),
+                FloatBuffer.wrap(ropeFreqsReal),
+                FloatBuffer.wrap(ropeFreqsImag),
+                // If "output.weight" is not present then the embedding weights are tied/shared with the decoder.
+                // This is commonly referred as "tie word embeddings".
+                loadQuantized(tensorEntries.getOrDefault("output.weight", tokenEmbeddings))
+        );
+
+        return qw;
     }
 
     private static Tokenizer createTokenizer(Map<String, Object> metadata, Vocabulary vocabulary) {
@@ -742,6 +785,8 @@ final class ModelLoader {
             //case F32 -> new F32FloatTensor(FloatTensor.numberOfElements(entry.shape()), entry.memorySegment());
             case Q8_0 -> new Q8_0FloatTensor(FloatTensor.numberOfElements(entry.shape()), entry.memorySegment());
             case Q4_0 -> new Q4_0FloatTensor(FloatTensor.numberOfElements(entry.shape()), entry.memorySegment());
+            case BF16 -> new BF16FloatTensor(FloatTensor.numberOfElements(entry.shape()), entry.memorySegment());
+            case F16 -> new F16FloatTensor(FloatTensor.numberOfElements(entry.shape()), entry.memorySegment());
             default -> throw new UnsupportedOperationException("Quantization format " + ggmlType);
         };
     }
@@ -772,8 +817,8 @@ final class ModelLoader {
 }
 
 record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) {
-    public State createNewState() {
-        State state = new State(configuration());
+    public State createNewState(int batchsize) {
+        State state = new State(configuration(), batchsize);
         state.latestToken = tokenizer.getSpecialTokens().get("<|begin_of_text|>");
         return state;
     }
@@ -786,12 +831,18 @@ record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) 
         public final int numberOfKeyValueHeads; // number of key/value heads (can be < query heads because of multiquery)
         public final int vocabularySize; // vocabulary size, usually 256 (byte-level)
         public final int contextLength; // max sequence length
-        public final boolean sharedWeights;
         public final float rmsNormEps;
         public final float ropeTheta;
         public final int headSize;
 
-        public Configuration(int dim, int hiddenDim, int numberOfLayers, int numberOfHeads, int numberOfKeyValueHeads, int vocabularySize, int contextLength, boolean sharedWeights, float rmsNormEps, float ropeTheta) {
+        Configuration withContextLength(int newContextLength) {
+            if (newContextLength < 0) {
+                return this; // no change
+            }
+            return new Configuration(this.dim, this.hiddenDim, this.numberOfLayers, this.numberOfHeads, this.numberOfKeyValueHeads, this.vocabularySize, newContextLength, this.rmsNormEps, this.ropeTheta);
+        }
+
+        public Configuration(int dim, int hiddenDim, int numberOfLayers, int numberOfHeads, int numberOfKeyValueHeads, int vocabularySize, int contextLength, float rmsNormEps, float ropeTheta) {
             this.dim = dim;
             this.hiddenDim = hiddenDim;
             this.numberOfLayers = numberOfLayers;
@@ -799,7 +850,6 @@ record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) 
             this.numberOfKeyValueHeads = numberOfKeyValueHeads;
             this.vocabularySize = vocabularySize;
             this.contextLength = contextLength;
-            this.sharedWeights = sharedWeights;
             this.rmsNormEps = rmsNormEps;
             this.ropeTheta = ropeTheta;
             this.headSize = dim / numberOfHeads;
@@ -850,37 +900,51 @@ record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) 
     public static final class State {
 
         // current wave of activations
-        public final FloatTensor x; // activation at current time stamp (dim,)
-        public final FloatTensor xb; // same, but inside a residual branch (dim,)
-        public final FloatTensor xb2; // an additional buffer just for convenience (dim,)
-        public final FloatTensor hb; // buffer for hidden dimension in the ffn (hidden_dim,)
-        public final FloatTensor hb2; // buffer for hidden dimension in the ffn (hidden_dim,)
-        public final FloatTensor q; // query (dim,)
-        public final FloatTensor k; // key (dim,)
-        public final FloatTensor v; // value (dim,)
-        public final FloatTensor att; // buffer for scores/attention values (n_heads, seq_len)
+        public final int batchsize;
+        public final FloatTensor[] x; // activation at current time stamp (dim,)
+        public final FloatTensor[] xb; // same, but inside a residual branch (dim,)
+        public final FloatTensor[] xb2; // an additional buffer just for convenience (dim,)
+        public final FloatTensor[] hb; // buffer for hidden dimension in the ffn (hidden_dim,)
+        public final FloatTensor[] hb2; // buffer for hidden dimension in the ffn (hidden_dim,)
+        public final FloatTensor[] q; // query (dim,)
+        public final FloatTensor[] k; // key (dim,)
+        public final FloatTensor[] v; // value (dim,)
+        public final FloatTensor[] att; // buffer for scores/attention values (n_heads, seq_len)
         public final FloatTensor logits; // output logits
+
         // kv cache
         public final FloatTensor[] keyCache;   // (n_layer, seq_len, kv_dim)
         public final FloatTensor[] valueCache; // (n_layer, seq_len, kv_dim)
+        
+        /** last index in previous block */
+        int idxPrevBlock;
 
         public int latestToken;
 
-        State(Configuration config) {
-            this.x = ArrayFloatTensor.allocate(config.dim);
-            this.xb = ArrayFloatTensor.allocate(config.dim);
-            this.xb2 = ArrayFloatTensor.allocate(config.dim);
-            this.hb = ArrayFloatTensor.allocate(config.hiddenDim);
-            this.hb2 = ArrayFloatTensor.allocate(config.hiddenDim);
-            this.q = ArrayFloatTensor.allocate(config.dim);
-            this.k = ArrayFloatTensor.allocate(config.dim);
-            this.v = ArrayFloatTensor.allocate(config.dim);
-            this.att = ArrayFloatTensor.allocate(config.numberOfHeads, config.contextLength);
+        State(Configuration config, int batchsize) {
+            this.batchsize = batchsize;
+            this.x = allocate(batchsize, config.dim);
+            this.xb = allocate(batchsize, config.dim);
+            this.xb2 = allocate(batchsize, config.dim);
+            this.hb = allocate(batchsize, config.hiddenDim);
+            this.hb2 = allocate(batchsize, config.hiddenDim);
+            this.q = allocate(batchsize, config.dim);
+            this.k = allocate(batchsize, config.dim);
+            this.v = allocate(batchsize, config.dim);
+            this.att = allocate(batchsize, config.numberOfHeads, config.contextLength);
+            idxPrevBlock = -1;
+
             this.logits = ArrayFloatTensor.allocate(config.vocabularySize);
             int kvDim = (config.dim * config.numberOfKeyValueHeads) / config.numberOfHeads;
             this.keyCache = Stream.generate(() -> ArrayFloatTensor.allocate(config.contextLength, kvDim)).limit(config.numberOfLayers).toArray(FloatTensor[]::new);
             this.valueCache = Stream.generate(() -> ArrayFloatTensor.allocate(config.contextLength, kvDim)).limit(config.numberOfLayers).toArray(FloatTensor[]::new);
         }
+    }
+
+    static FloatTensor[] allocate(int numTokens, int... dims) {
+        return IntStream.range(0, numTokens)
+                .mapToObj(i -> ArrayFloatTensor.allocate(dims))
+                .toArray(FloatTensor[]::new);
     }
 
     static void rmsnorm(FloatTensor out, FloatTensor x, FloatBuffer weight, int size, float rmsNormEps) {
@@ -894,7 +958,7 @@ record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) 
         out.mapWithIndexInPlace(0, size, (value, index) -> weight.get(index) * (finalss * x.getFloat(index)));
     }
 
-    static FloatTensor forward(Llama model, State state, int token, int position) {
+    static FloatTensor forward(Llama model, State state, int[] tokens, int position, boolean computeLogits) {
         // a few convenience variables
         Configuration config = model.configuration();
         Weights weights = model.weights();
@@ -903,44 +967,61 @@ record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) 
         int kvDim = (config.dim * config.numberOfKeyValueHeads) / config.numberOfHeads;
         int kvMul = config.numberOfHeads / config.numberOfKeyValueHeads; // integer multiplier of the kv sharing in multiquery
         float sqrtHeadSize = (float) Math.sqrt(headSize);
+        final int nTokens = tokens.length;
 
         // copy the token embedding into x
-        weights.token_embedding_table.copyTo(token * dim, state.x, 0, dim);
+        Parallel.parallelFor(0, nTokens, t ->
+            weights.token_embedding_table.copyTo(tokens[t] * dim, state.x[t], 0, dim)
+        );
 
         // forward all the layers
         for (int l = 0; l < config.numberOfLayers; l++) {
             // attention rmsnorm
-            rmsnorm(state.xb, state.x, weights.rms_att_weight[l], dim, config.rmsNormEps);
+            // rmsnorm(state.xb, state.x, weights.rms_att_weight[l], dim, config.rmsNormEps);
+            final int curLayer = l;
+            Parallel.parallelFor(0, nTokens, t ->
+                rmsnorm(state.xb[t], state.x[t], weights.rms_att_weight[curLayer], dim, config.rmsNormEps)
+            );
 
             // qkv matmuls for this position
-            weights.wq[l].matmul(state.xb, state.q, dim, dim);
-            weights.wk[l].matmul(state.xb, state.k, kvDim, dim);
-            weights.wv[l].matmul(state.xb, state.v, kvDim, dim);
+            weights.wq[l].matmul(nTokens, state.xb, state.q, dim, dim);
+            weights.wk[l].matmul(nTokens, state.xb, state.k, kvDim, dim);
+            weights.wv[l].matmul(nTokens, state.xb, state.v, kvDim, dim);
 
             // RoPE relative positional encoding: complex-valued rotate q and k in each head
-            for (int i = 0; i < dim; i += 2) {
-                int head_dim = i % headSize;
-                float fcr = weights.freq_cis_real.get(position * (headSize / 2) + (head_dim / 2));
-                float fci = weights.freq_cis_imag.get(position * (headSize / 2) + (head_dim / 2));
-                int rotn = i < kvDim ? 2 : 1; // how many vectors? 2 = q & k, 1 = q only
-                for (int v = 0; v < rotn; v++) {
-                    FloatTensor vec = v == 0 ? state.q : state.k; // the vector to rotate (query or key)
-                    float v0 = vec.getFloat(i);
-                    float v1 = vec.getFloat(i + 1);
-                    vec.setFloat(i, v0 * fcr - v1 * fci);
-                    vec.setFloat(i + 1, v0 * fci + v1 * fcr);
+            Parallel.parallelFor(0, nTokens, t -> {
+                for (int i = 0; i < dim; i += 2) {
+                    int head_dim = i % headSize;
+                    float fcr = weights.freq_cis_real.get((position + t) * (headSize / 2) + (head_dim / 2));
+                    float fci = weights.freq_cis_imag.get((position + t) * (headSize / 2) + (head_dim / 2));
+                    int rotn = i < kvDim ? 2 : 1; // how many vectors? 2 = q & k, 1 = q only
+                    for (int vi = 0; vi < rotn; vi++) {
+                        FloatTensor vec = vi == 0 ? state.q[t] : state.k[t]; // the vector to rotate (query or key)
+                        float v0 = vec.getFloat(i);
+                        float v1 = vec.getFloat(i + 1);
+                        vec.setFloat(i, v0 * fcr - v1 * fci);
+                        vec.setFloat(i + 1, v0 * fci + v1 * fcr);
+                    }
                 }
-            }
+            });
 
             // save key,value at this time step (position) to our kv cache
             //int loff = l * config.seq_len * kvDim; // kv cache layer offset for convenience
-            state.k.copyTo(0, state.keyCache[l], position * kvDim, kvDim);
-            state.v.copyTo(0, state.valueCache[l], position * kvDim, kvDim);
+            Parallel.parallelFor(0, nTokens, t -> {
+                state.k[t].copyTo(0, state.keyCache[curLayer], (position + t) * kvDim, kvDim);
+                state.v[t].copyTo(0, state.valueCache[curLayer], (position + t) * kvDim, kvDim);
+            });
 
-            int curLayer = l;
+            // If the logits are not required, the attention and FFN of the last layer can be skipped entirely.
+            if (!computeLogits && curLayer == config.numberOfLayers - 1) {
+                state.idxPrevBlock = nTokens - 1;
+                return null;
+            }
 
             // multihead attention. iterate over all heads
-            Parallel.parallelFor(0, config.numberOfHeads, h -> {
+            Parallel.parallelForLong(0, (long) nTokens * (long) config.numberOfHeads, ht -> {
+                int token = (int) (ht / config.numberOfHeads);
+                int h = (int) (ht % config.numberOfHeads);
                 // get the query vector for this head
                 // float* q = s.q + h * headSize;
                 int qOffset = h * headSize;
@@ -950,70 +1031,83 @@ record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) 
                 int attOffset = h * config.contextLength;
 
                 // iterate over all timesteps, including the current one
-                for (int t = 0; t <= position; t++) {
+                for (int t = 0; t <= position + token; t++) {
                     // get the key vector for this head and at this timestep
                     // float* k = s.key_cache + loff + t * dim + h * headSize;
                     int keyCacheOffset = /* loff + */ t * kvDim + (h / kvMul) * headSize;
                     // calculate the attention score as the dot product of q and k
-                    float score = state.q.dot(qOffset, state.keyCache[curLayer], keyCacheOffset, headSize);
+                    float score = state.q[token].dot(qOffset, state.keyCache[curLayer], keyCacheOffset, headSize);
                     score /= sqrtHeadSize;
                     // save the score to the attention buffer
-                    state.att.setFloat(attOffset + t, score);
+                    state.att[token].setFloat(attOffset + t, score);
                 }
 
                 // softmax the scores to get attention weights, from 0..position inclusively
-                state.att.softmaxInPlace(attOffset, position + 1);
+                state.att[token].softmaxInPlace(attOffset, position + token + 1);
 
                 // weighted sum of the values, store back into xb
                 // float* xb = s.xb + h * headSize;
                 int xbOffset = h * headSize;
                 // memset(xb, 0, headSize * sizeof(float));
-                state.xb.fillInPlace(xbOffset, headSize, 0f);
+                state.xb[token].fillInPlace(xbOffset, headSize, 0f);
 
-                for (int t = 0; t <= position; t++) {
+                for (int t = 0; t <= position + token; t++) {
                     // get the value vector for this head and at this timestep
                     // float* v = s.value_cache + loff + t * dim + h * headSize;
                     int vOffset = /* loff + */ t * kvDim + (h / kvMul) * headSize;
                     // get the attention weight for this timestep
-                    float a = state.att.getFloat(attOffset + t);
+                    float a = state.att[token].getFloat(attOffset + t);
                     // accumulate the weighted value into xb
-                    state.xb.saxpyInPlace(xbOffset, state.valueCache[curLayer], vOffset, headSize, a);
+                    state.xb[token].saxpyInPlace(xbOffset, state.valueCache[curLayer], vOffset, headSize, a);
                 }
             });
 
             // final matmul to get the output of the attention
-            weights.wo[l].matmul(state.xb, state.xb2, dim, dim);
+            weights.wo[l].matmul(nTokens, state.xb, state.xb2, dim, dim);
 
             // residual connection back into x
-            state.x.addInPlace(state.xb2);
+            Parallel.parallelFor(0, nTokens, t -> {
+                state.x[t].addInPlace(state.xb2[t]);
+            });
 
             // ffn rmsnorm
-            rmsnorm(state.xb, state.x, weights.rms_ffn_weight[l], dim, config.rmsNormEps);
+            Parallel.parallelFor(0, nTokens, t -> {
+                rmsnorm(state.xb[t], state.x[t], weights.rms_ffn_weight[curLayer], dim, config.rmsNormEps);
+            });
 
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
             // first calculate self.w1(x) and self.w3(x)
-            weights.w1[l].matmul(state.xb, state.hb, config.hiddenDim, dim);
-            weights.w3[l].matmul(state.xb, state.hb2, config.hiddenDim, dim);
+            weights.w1[l].matmul(nTokens, state.xb, state.hb, config.hiddenDim, dim);
+            weights.w3[l].matmul(nTokens, state.xb, state.hb2, config.hiddenDim, dim);
 
             // SwiGLU non-linearity
             // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
-            state.hb.mapInPlace(value -> value / (float) (1.0 + Math.exp(-value)));
+            Parallel.parallelFor(0, nTokens, t -> {
+                state.hb[t].mapInPlace(value -> value / (float) (1.0 + Math.exp(-value)));
+            });
 
             // elementwise multiply with w3(x)
-            state.hb.multiplyInPlace(state.hb2);
+            Parallel.parallelFor(0, nTokens, t -> {
+                state.hb[t].multiplyInPlace(state.hb2[t]);
+            });
 
             // final matmul to get the output of the ffn
-            weights.w2[l].matmul(state.hb, state.xb, dim, config.hiddenDim);
+            weights.w2[l].matmul(nTokens, state.hb, state.xb, dim, config.hiddenDim);
 
             // residual connection
-            state.x.addInPlace(state.xb);
+            Parallel.parallelFor(0, nTokens, t -> {
+                state.x[t].addInPlace(state.xb[t]);
+            });
         }
 
         // final rmsnorm
-        rmsnorm(state.x, state.x, weights.rms_final_weight, dim, config.rmsNormEps);
+        Parallel.parallelFor(0, nTokens, t -> {
+            rmsnorm(state.x[t], state.x[t], weights.rms_final_weight, dim, config.rmsNormEps);
+        });
 
         // classifier into logits
-        weights.wcls.matmul(state.x, state.logits, config.vocabularySize, dim);
+        weights.wcls.matmul(state.x[nTokens - 1], state.logits, config.vocabularySize, dim);
+        state.idxPrevBlock = nTokens - 1;
 
         return state.logits;
     }
@@ -1038,8 +1132,9 @@ record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) 
      * @return list of generated/inferred tokens, including the stop token, if any e.g. does not include any token from the prompt
      */
     public static List<Integer> generateTokens(Llama model, State state, int startPosition, List<Integer> promptTokens, Set<Integer> stopTokens, int maxTokens, Sampler sampler, boolean echo,
-            IntConsumer onTokenGenerated) {
+                                               IntConsumer onTokenGenerated) {
         long startNanos = System.nanoTime();
+        long startGen = 0;
         if (maxTokens < 0 || model.configuration().contextLength < maxTokens) {
             maxTokens = model.configuration().contextLength;
         }
@@ -1048,34 +1143,53 @@ record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) 
         int nextToken;
         int promptIndex = 0;
         for (int position = startPosition; position < maxTokens; ++position) {
-            forward(model, state, token, position);
             if (promptIndex < promptTokens.size()) {
-                // Force-pick token from prompt.
-                nextToken = promptTokens.get(promptIndex++);
-                if (echo) {
-                    // log prompt token (different color?)
-                    System.err.print(Tokenizer.replaceControlCharacters(model.tokenizer().decode(List.of(nextToken))));
+                final int nTokens = Math.min(maxTokens - position, Math.min(promptTokens.size() - promptIndex, state.batchsize));
+                final int[] tokens = new int[nTokens];
+                for (int i = 0; i < nTokens; i++) {
+                    tokens[i] = promptTokens.get(promptIndex + i);
+                    if (echo) {
+                        // log prompt token (different color?)
+                        System.err.print(Tokenizer.replaceControlCharacters(model.tokenizer().decode(List.of(tokens[i]))));
+                    }
                 }
+                if (echo) {
+                    System.out.format("position=%d, promptIdx=%d, promptSize=%d, tokens=%s%n", position, promptIndex, promptTokens.size(), Arrays.toString(tokens));
+                }
+                // Only compute logits on the very last batch.
+                boolean computeLogits = promptIndex + nTokens >= promptTokens.size();
+                forward(model, state, tokens, position, computeLogits);
+                position += nTokens - 1; // -1 -> incremented later in the for loop
+                promptIndex += nTokens;
+                if (promptIndex < promptTokens.size()) {
+                    continue;
+                }
+                startGen = System.nanoTime();
             } else {
-                nextToken = sampler.sampleToken(state.logits);
-                if (echo) {
-                    // log inferred token
-                    System.err.print(Tokenizer.replaceControlCharacters(model.tokenizer().decode(List.of(nextToken))));
-                }
-                generatedTokens.add(nextToken);
-                if (onTokenGenerated != null) {
-                    onTokenGenerated.accept(nextToken);
-                }
-                if (stopTokens.contains(nextToken)) {
-                    break;
-                }
+                forward(model, state, new int[]{token}, position, true);
+            }
+            nextToken = sampler.sampleToken(state.logits);
+            if (echo) {
+                // log inferred token
+                System.err.print(Tokenizer.replaceControlCharacters(model.tokenizer().decode(List.of(nextToken))));
+            }
+            generatedTokens.add(nextToken);
+            if (onTokenGenerated != null) {
+                onTokenGenerated.accept(nextToken);
+            }
+            if (stopTokens.contains(nextToken)) {
+                break;
             }
             state.latestToken = token = nextToken;
         }
 
         long elapsedNanos = System.nanoTime() - startNanos;
-        int totalTokens = promptIndex + generatedTokens.size();
-        System.err.printf("%n%.2f tokens/s (%d)%n", totalTokens / (elapsedNanos / 1_000_000_000.0), totalTokens);
+        long promptNanos = startGen - startNanos;
+        long genNanos = elapsedNanos - startGen + startNanos;
+        System.err.printf("%ncontext: %d/%d prompt: %.2f tokens/s (%d) generation: %.2f tokens/s (%d)%n",
+                startPosition + promptIndex + generatedTokens.size(), model.configuration().contextLength,
+                promptTokens.size() / (promptNanos / 1_000_000_000.0), promptTokens.size(),
+                generatedTokens.size() / (genNanos / 1_000_000_000.0), generatedTokens.size());
 
         return generatedTokens;
     }
@@ -1334,7 +1448,19 @@ class Tokenizer {
 
 final class Parallel {
     public static void parallelFor(int startInclusive, int endExclusive, IntConsumer action) {
+        if (startInclusive == 0 && endExclusive == 1) {
+            action.accept(0);
+            return;
+        }
         IntStream.range(startInclusive, endExclusive).parallel().forEach(action);
+    }
+
+    public static void parallelForLong(long startInclusive, long endExclusive, LongConsumer action) {
+        if (startInclusive == 0 && endExclusive == 1) {
+            action.accept(0);
+            return;
+        }
+        LongStream.range(startInclusive, endExclusive).parallel().forEach(action);
     }
 }
 
@@ -1345,31 +1471,49 @@ record GGMLTensorEntry(MemorySegment mappedFile, String name, GGMLType ggmlType,
                        MemorySegment memorySegment) {
 }
 
-final class Float16 {
-    public static final int BYTES = 2;
-}
-
 enum GGMLType {
     F32(Float.BYTES),
-    F16(Float16.BYTES),
-    Q4_0(Float16.BYTES + 16 * Byte.BYTES, 32),
-    Q4_1(2 * Float16.BYTES + 16 * Byte.BYTES, 32),
+    F16(GGMLType.FLOAT16_BYTES),
+    Q4_0(GGMLType.FLOAT16_BYTES + 16 * Byte.BYTES, 32),
+    Q4_1(2 * GGMLType.FLOAT16_BYTES + 16 * Byte.BYTES, 32),
     UNSUPPORTED_Q4_2(Integer.MAX_VALUE), // support has been removed
     UNSUPPORTED_Q4_3(Integer.MAX_VALUE), // support has been removed
     Q5_0(Integer.MAX_VALUE),
     Q5_1(Integer.MAX_VALUE),
-    Q8_0(Float16.BYTES + 32 * Byte.BYTES, 32),
+    Q8_0(GGMLType.FLOAT16_BYTES + 32 * Byte.BYTES, 32),
     Q8_1(32 * Byte.BYTES + 2 * Float.BYTES, 32),
     // k-quantizations
     Q2_K(Integer.MAX_VALUE),
     Q3_K(Integer.MAX_VALUE),
-    Q4_K(2 * Float16.BYTES + ((GGMLType.QK_K / 16) / 8 * 6) + GGMLType.QK_K / 2, GGMLType.QK_K),
-    Q5_K(2 * Float16.BYTES + ((GGMLType.QK_K / 16) / 8 * 6) + GGMLType.QK_K / 8 + GGMLType.QK_K / 2, GGMLType.QK_K),
-    Q6_K(GGMLType.QK_K / 2 + GGMLType.QK_K / 4 + GGMLType.QK_K / 16 + Float16.BYTES, GGMLType.QK_K),
+    Q4_K(2 * GGMLType.FLOAT16_BYTES + ((GGMLType.QK_K / 16) / 8 * 6) + GGMLType.QK_K / 2, GGMLType.QK_K),
+    Q5_K(2 * GGMLType.FLOAT16_BYTES + ((GGMLType.QK_K / 16) / 8 * 6) + GGMLType.QK_K / 8 + GGMLType.QK_K / 2, GGMLType.QK_K),
+    Q6_K(GGMLType.QK_K / 2 + GGMLType.QK_K / 4 + GGMLType.QK_K / 16 + GGMLType.FLOAT16_BYTES, GGMLType.QK_K),
     Q8_K(Integer.MAX_VALUE),
+
+    IQ2_XXS(Integer.MAX_VALUE),
+    IQ2_XS(Integer.MAX_VALUE),
+    IQ3_XXS(Integer.MAX_VALUE),
+    IQ1_S(Integer.MAX_VALUE),
+    IQ4_NL(Integer.MAX_VALUE),
+    IQ3_S(Integer.MAX_VALUE),
+    IQ2_S(Integer.MAX_VALUE),
+    IQ4_XS(Integer.MAX_VALUE),
+
     I8(Byte.BYTES),
     I16(Short.BYTES),
-    I32(Integer.BYTES);
+    I32(Integer.BYTES),
+    I64(Long.BYTES),
+    F64(Double.BYTES),
+    IQ1_M(Integer.MAX_VALUE),
+    BF16(GGMLType.BFLOAT16_BYTES),
+    Q4_0_4_4(GGMLType.FLOAT16_BYTES + 16 * Byte.BYTES, 32),
+    Q4_0_4_8(GGMLType.FLOAT16_BYTES + 16 * Byte.BYTES, 32),
+    Q4_0_8_8(GGMLType.FLOAT16_BYTES + 16 * Byte.BYTES, 32),
+    TQ1_0(Integer.MAX_VALUE),
+    TQ2_0(Integer.MAX_VALUE);
+
+    public static final int BFLOAT16_BYTES = 2;
+    public static final int FLOAT16_BYTES = 2;
 
     private static final GGMLType[] VALUES = values();
 
@@ -1421,14 +1565,53 @@ enum GGMLType {
  * e.g. can represent a sequence of quantized floats.
  */
 abstract class FloatTensor {
-    static final ValueLayout.OfFloat JAVA_FLOAT_LE = ValueLayout.JAVA_FLOAT.withOrder(ByteOrder.LITTLE_ENDIAN);
-    static final ValueLayout.OfShort JAVA_SHORT_LE = ValueLayout.JAVA_SHORT.withOrder(ByteOrder.LITTLE_ENDIAN);
+    static final int VECTOR_BIT_SIZE = Integer.getInteger("llama.VectorBitSize", VectorShape.preferredShape().vectorBitSize());
+    static final boolean USE_VECTOR_API = VECTOR_BIT_SIZE != 0;
 
-    static final boolean USE_VECTOR_API = Boolean.parseBoolean(System.getProperty("llama.VectorAPI", "true"));
+    // static final ValueLayout.OfFloat JAVA_FLOAT_LE = ValueLayout.JAVA_FLOAT.withOrder(ByteOrder.LITTLE_ENDIAN);
+    // static final ValueLayout.OfShort JAVA_SHORT_LE = ValueLayout.JAVA_SHORT.withOrder(ByteOrder.LITTLE_ENDIAN);
+
+    // The use of Unsafe in this file is a temporary workaround to support native-image.
+    static final Unsafe UNSAFE;
+
+    static {
+        try {
+            Field f = Unsafe.class.getDeclaredField("theUnsafe");
+            f.setAccessible(true);
+            UNSAFE = (Unsafe) f.get(null);
+        } catch (NoSuchFieldException | IllegalAccessException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    static short readShort(MemorySegment memorySegment, long offset) {
+        // The MemorySegment.get* methods should be used instead.
+        return UNSAFE.getShort(memorySegment.address() + offset);
+    }
+
+    static byte readByte(MemorySegment memorySegment, long offset) {
+        // The MemorySegment.get* methods should be used instead.
+        return UNSAFE.getByte(memorySegment.address() + offset);
+    }
 
     // Preferred vector size for the fast multiplication routines.
     // (Apple Silicon) NEON only supports up-to 128bit vectors.
-    static final VectorSpecies<Float> F_SPECIES = FloatVector.SPECIES_PREFERRED.vectorBitSize() == 128 ? FloatVector.SPECIES_128 : FloatVector.SPECIES_256;
+    static final VectorSpecies<Float> F_SPECIES;
+    static final VectorSpecies<Integer> I_SPECIES;
+    static final VectorSpecies<Short> S_SPECIES_HALF;
+
+    static {
+        if (USE_VECTOR_API) {
+            F_SPECIES = VectorShape.forBitSize(VECTOR_BIT_SIZE).withLanes(float.class);
+            I_SPECIES = F_SPECIES.withLanes(int.class);
+            S_SPECIES_HALF = VectorShape.forBitSize(F_SPECIES.vectorBitSize() / 2).withLanes(short.class);
+            assert F_SPECIES.length() == S_SPECIES_HALF.length();
+        } else {
+            F_SPECIES = null;
+            I_SPECIES = null;
+            S_SPECIES_HALF = null;
+        }
+    }
 
     abstract int size();
 
@@ -1459,6 +1642,17 @@ abstract class FloatTensor {
 
     void matmul(FloatTensor that, FloatTensor out, int dim0, int dim1) {
         Parallel.parallelFor(0, dim0, i -> out.setFloat(i, dot(i * dim1, that, 0, dim1)));
+    }
+
+    void matmul(int context, FloatTensor[] that, FloatTensor[] out, int dim0, int dim1) {
+        if (that.length != out.length) {
+            throw new IllegalArgumentException(String.format("that.len=%d, out.len=%d", that.length, out.length));
+        }
+        Parallel.parallelForLong(0, dim0 * context, ti -> {
+            int idxArr = (int) (ti / dim0);
+            int i = (int) (ti % dim0);
+            out[idxArr].setFloat(i, dot(i * dim1, that[idxArr], 0, dim1)); 
+        });
     }
 
     @FunctionalInterface
@@ -1527,7 +1721,7 @@ abstract class FloatTensor {
         return mapInPlace(0, size(), mapFunction);
     }
 
-    FloatTensor mapWithIndexInPlace(int thisOffset, int size, MapWithIndexFunction mapWithIndexFunction) {
+    FloatTensor mapWithIndexInPlace(int thisOffset, int size, FloatTensor.MapWithIndexFunction mapWithIndexFunction) {
         int endOffset = thisOffset + size;
         for (int i = thisOffset; i < endOffset; ++i) {
             setFloat(i, mapWithIndexFunction.apply(getFloat(i), i));
@@ -1620,13 +1814,13 @@ final class Q4_0FloatTensor extends FloatTensor {
         assert 0 <= index && index < size;
         int blockIndex = index / GGMLType.Q4_0.getBlockSize();
         int blockOffset = blockIndex * GGMLType.Q4_0.getTypeSize();
-        float scale = Float.float16ToFloat(memorySegment.get(JAVA_SHORT_LE, blockOffset));
+        float scale = Float.float16ToFloat(readShort(memorySegment, blockOffset));
         byte quant;
         int modIndex = index % GGMLType.Q4_0.getBlockSize();
         if (modIndex < GGMLType.Q4_0.getBlockSize() / 2) {
-            quant = (byte) (memorySegment.get(ValueLayout.JAVA_BYTE, blockOffset + Float16.BYTES + modIndex) & 0x0F);
+            quant = (byte) (readByte(memorySegment, blockOffset + GGMLType.FLOAT16_BYTES + modIndex) & 0x0F);
         } else {
-            quant = (byte) ((memorySegment.get(ValueLayout.JAVA_BYTE, blockOffset + Float16.BYTES + modIndex - GGMLType.Q4_0.getBlockSize() / 2) >>> 4) & 0x0F);
+            quant = (byte) ((readByte(memorySegment, blockOffset + GGMLType.FLOAT16_BYTES + modIndex - GGMLType.Q4_0.getBlockSize() / 2) >>> 4) & 0x0F);
         }
         quant -= 8;
         return quant * scale;
@@ -1635,13 +1829,13 @@ final class Q4_0FloatTensor extends FloatTensor {
     @Override
     public float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
         if (FloatTensor.USE_VECTOR_API) {
-            return vectorDot(this, thisOffset, that, thatOffset, size);
+            return vectorDot(this, thisOffset, (ArrayFloatTensor) that, thatOffset, size);
         } else {
             return FloatTensor.scalarDot(this, thisOffset, that, thatOffset, size);
         }
     }
 
-    private static float vectorDot(Q4_0FloatTensor thiz, int thisOffset, FloatTensor that, int thatOffset, int size) {
+    private static float vectorDot(Q4_0FloatTensor thiz, int thisOffset, ArrayFloatTensor that, int thatOffset, int size) {
         float result = 0f;
         int j = 0;
 
@@ -1658,30 +1852,36 @@ final class Q4_0FloatTensor extends FloatTensor {
         int blockOffset = (thisOffset + j) / GGMLType.Q4_0.getBlockSize() * GGMLType.Q4_0.getTypeSize();
         int upperBound = size / GGMLType.Q4_0.getBlockSize() * GGMLType.Q4_0.getBlockSize();
         for (; j < upperBound; j += GGMLType.Q4_0.getBlockSize(), blockOffset += GGMLType.Q4_0.getTypeSize()) {
-            float wScaleValue = Float.float16ToFloat(thiz.memorySegment.get(JAVA_SHORT_LE, blockOffset));
+            float wScaleValue = Float.float16ToFloat(readShort(thiz.memorySegment, blockOffset));
             var wScale = FloatVector.broadcast(F_SPECIES, wScaleValue);
-            var B_SPECIES = ByteVector.SPECIES_128;
-            var wBytes = ByteVector.fromMemorySegment(B_SPECIES, thiz.memorySegment, blockOffset + Float16.BYTES, ByteOrder.LITTLE_ENDIAN);
+            var wBytes = ByteVector.fromMemorySegment(ByteVector.SPECIES_128, thiz.memorySegment, blockOffset + GGMLType.FLOAT16_BYTES, ByteOrder.LITTLE_ENDIAN);
             var loBytes = wBytes.and((byte) 0xF).sub((byte) 8);
             var hiBytes = wBytes.lanewise(VectorOperators.LSHR, 4).sub((byte) 8);
-            if (F_SPECIES.vectorBitSize() == 256) {
-                var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + 0 * F_SPECIES.length()).mul(loBytes.castShape(F_SPECIES, 0));
-                var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + 1 * F_SPECIES.length()).mul(loBytes.castShape(F_SPECIES, 1));
-                var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + 2 * F_SPECIES.length()).mul(hiBytes.castShape(F_SPECIES, 0));
-                var sum3 = that.getFloatVector(F_SPECIES, thatOffset + j + 3 * F_SPECIES.length()).mul(hiBytes.castShape(F_SPECIES, 1));
-                val = sum0.add(sum1).add(sum2).add(sum3).fma(wScale, val);
-            } else if (F_SPECIES.vectorBitSize() == 128) {
-                // This loop cannot be unrolled, why?
-                for (int i = 0; i < 2; ++i) {
-                    var tmp = i == 0 ? loBytes : hiBytes;
-                    var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + (i * 4 + 0) * F_SPECIES.length()).mul(tmp.castShape(F_SPECIES, 0));
-                    var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + (i * 4 + 1) * F_SPECIES.length()).mul(tmp.castShape(F_SPECIES, 1));
-                    var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + (i * 4 + 2) * F_SPECIES.length()).mul(tmp.castShape(F_SPECIES, 2));
-                    var sum3 = that.getFloatVector(F_SPECIES, thatOffset + j + (i * 4 + 3) * F_SPECIES.length()).mul(tmp.castShape(F_SPECIES, 3));
+            switch (F_SPECIES.vectorBitSize()) {
+                case 512 -> {
+                    var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + 0 * F_SPECIES.length()).mul(loBytes.castShape(F_SPECIES, 0));
+                    var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + 1 * F_SPECIES.length()).mul(hiBytes.castShape(F_SPECIES, 0));
+                    val = sum0.add(sum2).fma(wScale, val);
+                }
+                case 256 -> {
+                    var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + 0 * F_SPECIES.length()).mul(loBytes.castShape(F_SPECIES, 0));
+                    var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + 1 * F_SPECIES.length()).mul(loBytes.castShape(F_SPECIES, 1));
+                    var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + 2 * F_SPECIES.length()).mul(hiBytes.castShape(F_SPECIES, 0));
+                    var sum3 = that.getFloatVector(F_SPECIES, thatOffset + j + 3 * F_SPECIES.length()).mul(hiBytes.castShape(F_SPECIES, 1));
                     val = sum0.add(sum1).add(sum2).add(sum3).fma(wScale, val);
                 }
-            } else {
-                throw new UnsupportedOperationException(F_SPECIES.toString());
+                case 128 -> {
+                    // This loop cannot be unrolled, why?
+                    for (int i = 0; i < 2; ++i) {
+                        var tmp = i == 0 ? loBytes : hiBytes;
+                        var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + (i * 4 + 0) * F_SPECIES.length()).mul(tmp.castShape(F_SPECIES, 0));
+                        var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + (i * 4 + 1) * F_SPECIES.length()).mul(tmp.castShape(F_SPECIES, 1));
+                        var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + (i * 4 + 2) * F_SPECIES.length()).mul(tmp.castShape(F_SPECIES, 2));
+                        var sum3 = that.getFloatVector(F_SPECIES, thatOffset + j + (i * 4 + 3) * F_SPECIES.length()).mul(tmp.castShape(F_SPECIES, 3));
+                        val = sum0.add(sum1).add(sum2).add(sum3).fma(wScale, val);
+                    }
+                }
+                default -> throw new UnsupportedOperationException(F_SPECIES.toString());
             }
         }
         result += val.reduceLanes(VectorOperators.ADD);
@@ -1731,8 +1931,8 @@ final class Q8_0FloatTensor extends FloatTensor {
         int blockIndex = index / GGMLType.Q8_0.getBlockSize();
         int withinBlockIndex = index % GGMLType.Q8_0.getBlockSize();
         int blockOffset = blockIndex * GGMLType.Q8_0.getTypeSize();
-        byte quant = memorySegment.get(ValueLayout.JAVA_BYTE, blockOffset + Float16.BYTES + withinBlockIndex);
-        float scale = Float.float16ToFloat(memorySegment.get(JAVA_SHORT_LE, blockOffset));
+        byte quant = readByte(memorySegment, blockOffset + GGMLType.FLOAT16_BYTES + withinBlockIndex);
+        float scale = Float.float16ToFloat(readShort(memorySegment, blockOffset));
         return quant * scale;
     }
 
@@ -1741,13 +1941,13 @@ final class Q8_0FloatTensor extends FloatTensor {
     @Override
     public float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
         if (FloatTensor.USE_VECTOR_API) {
-            return vectorDot(this, thisOffset, that, thatOffset, size);
+            return vectorDot(this, thisOffset, (ArrayFloatTensor) that, thatOffset, size);
         } else {
             return FloatTensor.scalarDot(this, thisOffset, that, thatOffset, size);
         }
     }
 
-    private static float vectorDot(Q8_0FloatTensor thiz, int thisOffset, FloatTensor that, int thatOffset, int size) {
+    private static float vectorDot(Q8_0FloatTensor thiz, int thisOffset, ArrayFloatTensor that, int thatOffset, int size) {
         float result = 0f;
         int j = 0;
 
@@ -1764,28 +1964,35 @@ final class Q8_0FloatTensor extends FloatTensor {
         int blockOffset = (thisOffset + j) / GGMLType.Q8_0.getBlockSize() * GGMLType.Q8_0.getTypeSize();
         int upperBound = size / GGMLType.Q8_0.getBlockSize() * GGMLType.Q8_0.getBlockSize();
         for (; j < upperBound; j += GGMLType.Q8_0.getBlockSize(), blockOffset += GGMLType.Q8_0.getTypeSize()) {
-            float wScaleValue = Float.float16ToFloat(thiz.memorySegment.get(JAVA_SHORT_LE, blockOffset));
+            float wScaleValue = Float.float16ToFloat(readShort(thiz.memorySegment, blockOffset));
             var wScale = FloatVector.broadcast(F_SPECIES, wScaleValue);
-            if (F_SPECIES.vectorBitSize() == 256) {
-                var wBytes = ByteVector.fromMemorySegment(ByteVector.SPECIES_256, thiz.memorySegment, blockOffset + Float16.BYTES, ByteOrder.LITTLE_ENDIAN);
-                var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + 0 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 0));
-                var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + 1 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 1));
-                var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + 2 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 2));
-                var sum3 = that.getFloatVector(F_SPECIES, thatOffset + j + 3 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 3));
-                val = sum0.add(sum1).add(sum2).add(sum3).fma(wScale, val);
-            } else if (F_SPECIES.vectorBitSize() == 128) {
-                VectorSpecies<Byte> B_128 = ByteVector.SPECIES_128;
-                // This loop cannot be unrolled, why?
-                for (int i = 0; i < 2; ++i) {
-                    var wBytes = ByteVector.fromMemorySegment(B_128, thiz.memorySegment, blockOffset + Float16.BYTES + i * B_128.vectorByteSize(), ByteOrder.LITTLE_ENDIAN);
-                    var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + 0 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 0));
-                    var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + 1 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 1));
-                    var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + 2 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 2));
-                    var sum3 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + 3 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 3));
+            switch (F_SPECIES.vectorBitSize()) {
+                case 512 -> {
+                    var wBytes = ByteVector.fromMemorySegment(ByteVector.SPECIES_256, thiz.memorySegment, blockOffset + GGMLType.FLOAT16_BYTES, ByteOrder.LITTLE_ENDIAN);
+                    var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + 0 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 0));
+                    var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + 1 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 1));
+                    val = sum0.add(sum1).fma(wScale, val);
+                }
+                case 256 -> {
+                    var wBytes = ByteVector.fromMemorySegment(ByteVector.SPECIES_256, thiz.memorySegment, blockOffset + GGMLType.FLOAT16_BYTES, ByteOrder.LITTLE_ENDIAN);
+                    var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + 0 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 0));
+                    var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + 1 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 1));
+                    var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + 2 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 2));
+                    var sum3 = that.getFloatVector(F_SPECIES, thatOffset + j + 3 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 3));
                     val = sum0.add(sum1).add(sum2).add(sum3).fma(wScale, val);
                 }
-            } else {
-                throw new UnsupportedOperationException(F_SPECIES.toString());
+                case 128 -> {
+                    // This loop cannot be unrolled, why?
+                    for (int i = 0; i < 2; ++i) {
+                        var wBytes = ByteVector.fromMemorySegment(ByteVector.SPECIES_128, thiz.memorySegment, blockOffset + GGMLType.FLOAT16_BYTES + i * ByteVector.SPECIES_128.vectorByteSize(), ByteOrder.LITTLE_ENDIAN);
+                        var sum0 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + 0 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 0));
+                        var sum1 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + 1 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 1));
+                        var sum2 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + 2 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 2));
+                        var sum3 = that.getFloatVector(F_SPECIES, thatOffset + j + i * 16 + 3 * F_SPECIES.length()).mul(wBytes.castShape(F_SPECIES, 3));
+                        val = sum0.add(sum1).add(sum2).add(sum3).fma(wScale, val);
+                    }
+                }
+                default -> throw new UnsupportedOperationException(F_SPECIES.toString());
             }
         }
         result += val.reduceLanes(VectorOperators.ADD);
@@ -1793,6 +2000,184 @@ final class Q8_0FloatTensor extends FloatTensor {
         // Remaining entries.
         if (j < size) {
             result += FloatTensor.scalarDot(thiz, thisOffset + j, that, thatOffset + j, size - j);
+        }
+
+        return result;
+    }
+}
+
+final class BF16FloatTensor extends FloatTensor {
+
+    final int size;
+    final MemorySegment memorySegment;
+
+    public BF16FloatTensor(int size, MemorySegment memorySegment) {
+        this.size = size;
+        this.memorySegment = memorySegment;
+    }
+
+    @Override
+    int size() {
+        return size;
+    }
+
+    @Override
+    public void setFloat(int index, float value) {
+        throw new UnsupportedOperationException("setFloat");
+    }
+
+    @Override
+    FloatVector getFloatVector(VectorSpecies<Float> species, int index) {
+        throw new UnsupportedOperationException("getFloatVector");
+    }
+
+    @Override
+    public GGMLType type() {
+        return GGMLType.BF16;
+    }
+
+    @Override
+    public float getFloat(int index) {
+        assert 0 <= index && index < size;
+        return bfloat16ToFloat(readShort(memorySegment, index * GGMLType.BFLOAT16_BYTES));
+    }
+
+    private float bfloat16ToFloat(short bfloat16) {
+        return Float.intBitsToFloat(bfloat16 << 16);
+    }
+
+    @Override
+    public float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
+        if (FloatTensor.USE_VECTOR_API) {
+            return vectorDot(this, thisOffset, (ArrayFloatTensor) that, thatOffset, size);
+        } else {
+            return FloatTensor.scalarDot(this, thisOffset, that, thatOffset, size);
+        }
+    }
+
+    private static float vectorDot(BF16FloatTensor thiz, int thisOffset, ArrayFloatTensor that, int thatOffset, int size) {
+        assert S_SPECIES_HALF.length() == F_SPECIES.length();
+        FloatVector val = FloatVector.zero(F_SPECIES);
+        int upperBound = F_SPECIES.loopBound(size);
+        for (int i = 0; i < upperBound; i += F_SPECIES.length()) {
+            FloatVector thatVector = that.getFloatVector(F_SPECIES, thatOffset + i);
+            ShortVector bfloat16 = ShortVector.fromMemorySegment(S_SPECIES_HALF, thiz.memorySegment, (thisOffset + i) * (long) GGMLType.BFLOAT16_BYTES, ByteOrder.LITTLE_ENDIAN);
+            // BFloat16 to Float32 Conversion:
+            //
+            // ┌─[15]─┬─[14]───····───[7]─┬─[6]────····────[0]─┐
+            // │ Sign │ Exponent (8 bits) │ Mantissa (7 bits)  │ BFloat16 Layout (16 bits)
+            // └──────┴───────────────────┴────────────────────┘
+            //    │             │                    │
+            //    ▼             ▼                    ▼
+            // ┌─[31]─┬─[30]───···───[23]─┬─[22]────···────[0]─┐
+            // │ Sign │ Exponent (8 bits) │ Mantissa (23 bits) │ Float32 Layout (32 bits)
+            // └──────┴───────────────────┴────────────────────┘
+            FloatVector thizVector = bfloat16
+                    .castShape(I_SPECIES, 0) // (int) vi
+                    .lanewise(VectorOperators.LSHL, 16) // vi <<= 16
+                    .reinterpretAsFloats(); // Float.intBitsToFloat(vi)
+            val = thizVector.fma(thatVector, val);
+        }
+        float result = val.reduceLanes(VectorOperators.ADD);
+        // Remaining entries.
+        if (upperBound < size) {
+            result += scalarDot(thiz, thisOffset + upperBound, that, thatOffset + upperBound, size - upperBound);
+        }
+
+        return result;
+    }
+}
+
+final class F16FloatTensor extends FloatTensor {
+
+    final int size;
+    final MemorySegment memorySegment;
+
+    public F16FloatTensor(int size, MemorySegment memorySegment) {
+        this.size = size;
+        this.memorySegment = memorySegment;
+    }
+
+    @Override
+    int size() {
+        return size;
+    }
+
+    @Override
+    public void setFloat(int index, float value) {
+        throw new UnsupportedOperationException("setFloat");
+    }
+
+    @Override
+    FloatVector getFloatVector(VectorSpecies<Float> species, int index) {
+        throw new UnsupportedOperationException("getFloatVector");
+    }
+
+    @Override
+    public GGMLType type() {
+        return GGMLType.F16;
+    }
+
+    @Override
+    public float getFloat(int index) {
+        assert 0 <= index && index < size;
+        return Float.float16ToFloat(readShort(memorySegment, index * GGMLType.FLOAT16_BYTES));
+    }
+
+    @Override
+    public float dot(int thisOffset, FloatTensor that, int thatOffset, int size) {
+        if (FloatTensor.USE_VECTOR_API) {
+            return vectorDot(this, thisOffset, (ArrayFloatTensor) that, thatOffset, size);
+        } else {
+            return FloatTensor.scalarDot(this, thisOffset, that, thatOffset, size);
+        }
+    }
+
+    private static float vectorDot(F16FloatTensor thiz, int thisOffset, ArrayFloatTensor that, int thatOffset, int size) {
+        assert S_SPECIES_HALF.length() == F_SPECIES.length();
+        FloatVector val = FloatVector.zero(F_SPECIES);
+        int upperBound = F_SPECIES.loopBound(size);
+        for (int i = 0; i < upperBound; i += F_SPECIES.length()) {
+            FloatVector thatVector = that.getFloatVector(F_SPECIES, thatOffset + i);
+            ShortVector bits16 = ShortVector.fromMemorySegment(S_SPECIES_HALF, thiz.memorySegment, (thisOffset + i) * (long) GGMLType.FLOAT16_BYTES, ByteOrder.LITTLE_ENDIAN);
+
+            var bits32 = bits16.castShape(I_SPECIES, 0).reinterpretAsInts(); // (int) bits16
+            // Does not support infinities nor NaNs, preserves sign, emulate DAZ (denormals-are-zero).
+            // Expects well-formed float16 values only (e.g. model weights).
+            // Fast Float16 to Float32 Conversion:
+            //
+            // ┌─[15]─┬─[14]───···───[10]─┬─[9]────····────[0]─┐
+            // │ Sign │ Exponent (5 bits) │ Mantissa (10 bits) │ Float16 Layout (16 bits)
+            // └──────┴───────────────────┴────────────────────┘
+            //    │             │                    │
+            //    ▼             ▼                    ▼
+            // ┌─[31]─┬─[30]───···───[23]─┬─[22]────···────[0]─┐
+            // │ Sign │ Exponent (8 bits) │ Mantissa (23 bits) │ Float32 Layout (32 bits)
+            // └──────┴───────────────────┴────────────────────┘
+            //
+            // Shifts and adjustments:
+            // - Sign:       float16[15] -> float32[31] (shift 16 bits up)
+            // - Exponent:   float16[10-14] -> float32[23-30] (+ bias adjustment)
+            // - Mantissa:   float16[0-9] -> float32[13-22] (shift 13 bits up)
+            //
+            // exp = bits32 & 0x7C00
+            // zeroExponentMask = exp == 0 ? 0 : ~0
+            var zeroExponentMask = bits32.and(0x7C00).neg().lanewise(VectorOperators.ASHR, 31); // = (-exp) >> 31
+            bits32 = bits32.and(0x8000).lanewise(VectorOperators.LSHL, 16) // sign
+                    .or(
+                            // exponent and mantissa combined
+                            bits32.and(0x7FFF).add(0x1C000).lanewise(VectorOperators.LSHL, 13)
+                                    .and(zeroExponentMask) // -0, +0 and DAZ (denormals-are-zero)
+
+                    );
+
+            FloatVector thizVector = bits32.reinterpretAsFloats(); // Float.intBitsToFloat(vi)
+            val = thizVector.fma(thatVector, val);
+        }
+        float result = val.reduceLanes(VectorOperators.ADD);
+        // Remaining entries.
+        if (upperBound < size) {
+            result += scalarDot(thiz, thisOffset + upperBound, that, thatOffset + upperBound, size - upperBound);
         }
 
         return result;
@@ -1848,7 +2233,8 @@ final class ArrayFloatTensor extends FloatTensor {
 }
 
 final class RoPE {
-    public static Pair<float[], float[]> precomputeFreqsCis(int contextLength, int headSize, double theta) {
+    public static Pair<float[], float[]> precomputeFreqsCis(int contextLength, int headSize, double theta,
+                                                            boolean ropeScaling, float scaleFactor, float loFreqFactor, float hiFreqFactor, float oldContextLength) {
         assert headSize % 2 == 0;
         float[] cr = new float[contextLength * (headSize / 2)];
         float[] ci = new float[contextLength * (headSize / 2)];
@@ -1856,6 +2242,20 @@ final class RoPE {
         for (int pos = 0; pos < contextLength; ++pos) {
             for (int i = 0; i < headSize; i += 2) {
                 float freq = (float) (1.0 / Math.pow(theta, i / (double) headSize));
+                if (ropeScaling) {
+                    // Llama 3.1 scaling
+                    float loFreqWavelen = oldContextLength / loFreqFactor;
+                    float hiFreqWavelen = oldContextLength / hiFreqFactor;
+                    float wavelen = (float) (2.0 * Math.PI / freq);
+                    if (wavelen < hiFreqWavelen) {
+                        freq = freq;
+                    } else if (wavelen > loFreqWavelen) {
+                        freq = freq / scaleFactor;
+                    } else {
+                        float smooth = (oldContextLength / wavelen - loFreqFactor) / (hiFreqFactor - loFreqFactor);
+                        freq = (1.0f - smooth) * freq / scaleFactor + smooth * freq;
+                    }
+                }
                 float val = pos * freq;
                 cr[n] = (float) Math.cos(val);
                 ci[n] = (float) Math.sin(val);
@@ -2008,12 +2408,14 @@ final class ToppSampler implements Sampler {
  */
 class ChatFormat {
 
-    protected final Tokenizer tokenizer;
-    protected final int beginOfText;
-    protected final int endHeader;
-    protected final int startHeader;
-    protected final int endOfTurn;
-    protected final int endOfText;
+    final Tokenizer tokenizer;
+    final int beginOfText;
+    final int endHeader;
+    final int startHeader;
+    final int endOfTurn;
+    final int endOfText;
+    final int endOfMessage;
+    final Set<Integer> stopTokens;
 
     public ChatFormat(Tokenizer tokenizer) {
         this.tokenizer = tokenizer;
@@ -2023,6 +2425,8 @@ class ChatFormat {
         this.endHeader = specialTokens.get("<|end_header_id|>");
         this.endOfTurn = specialTokens.get("<|eot_id|>");
         this.endOfText = specialTokens.get("<|end_of_text|>");
+        this.endOfMessage = specialTokens.getOrDefault("<|eom_id|>", -1); // only in 3.1
+        this.stopTokens = Set.of(endOfText, endOfTurn);
     }
 
     public Tokenizer getTokenizer() {
@@ -2030,10 +2434,10 @@ class ChatFormat {
     }
 
     public Set<Integer> getStopTokens() {
-        return Set.of(endOfText, endOfTurn);
+        return stopTokens;
     }
 
-    public List<Integer> encodeHeader(Message message) {
+    public List<Integer> encodeHeader(ChatFormat.Message message) {
         List<Integer> tokens = new ArrayList<>();
         tokens.add(startHeader);
         tokens.addAll(this.tokenizer.encodeAsList(message.role().name()));
@@ -2042,33 +2446,33 @@ class ChatFormat {
         return tokens;
     }
 
-    public List<Integer> encodeMessage(Message message) {
+    public List<Integer> encodeMessage(ChatFormat.Message message) {
         List<Integer> tokens = this.encodeHeader(message);
         tokens.addAll(this.tokenizer.encodeAsList(message.content().strip()));
         tokens.add(endOfTurn);
         return tokens;
     }
 
-    public List<Integer> encodeDialogPrompt(boolean appendAssistantTurn, List<Message> dialog) {
+    public List<Integer> encodeDialogPrompt(boolean appendAssistantTurn, List<ChatFormat.Message> dialog) {
         List<Integer> tokens = new ArrayList<>();
         tokens.add(beginOfText);
-        for (Message message : dialog) {
+        for (ChatFormat.Message message : dialog) {
             tokens.addAll(this.encodeMessage(message));
         }
         if (appendAssistantTurn) {
             // Add the start of an assistant message for the model to complete.
-            tokens.addAll(this.encodeHeader(new Message(Role.ASSISTANT, "")));
+            tokens.addAll(this.encodeHeader(new ChatFormat.Message(ChatFormat.Role.ASSISTANT, "")));
         }
         return tokens;
     }
 
-    public record Message(Role role, String content) {
+    public record Message(ChatFormat.Role role, String content) {
     }
 
     public record Role(String name) {
-        public static Role SYSTEM = new Role("system");
-        public static Role USER = new Role("user");
-        public static Role ASSISTANT = new Role("assistant");
+        public static ChatFormat.Role SYSTEM = new ChatFormat.Role("system");
+        public static ChatFormat.Role USER = new ChatFormat.Role("user");
+        public static ChatFormat.Role ASSISTANT = new ChatFormat.Role("assistant");
 
         @Override
         public String toString() {
@@ -2077,3 +2481,65 @@ class ChatFormat {
     }
 }
 
+/**
+ * Support for AOT preloading of GGUF metadata with GraalVM's Native Image.
+ *
+ * <p>
+ * To preload a model at build time, pass {@code -Dllama.PreloadGGUF=/path/to/model.gguf}
+ * to the native-image builder command. At runtime, the preloaded model will be used
+ * iff the specified and preloaded file names (base name) match.
+ */
+final class AOT {
+    record PartialModel(String modelFileName, Llama model, long tensorDataOffset, Map<String, GGUF.GGUFTensorInfo> tensorInfos) {}
+
+    private static final PartialModel PRELOADED_GGUF = preLoadGGUF(System.getProperty("llama.PreloadGGUF"));
+
+    private static PartialModel preLoadGGUF(String modelPath) {
+        if (modelPath == null || modelPath.isEmpty()) {
+            return null;
+        }
+        try {
+            Path path = Path.of(modelPath);
+            if (!Files.exists(path) || !Files.isRegularFile(path)) {
+                throw new IllegalArgumentException("Cannot pre-load model: " + path);
+            }
+            GGUF gguf = GGUF.loadModel(path);
+            try (FileChannel fileChannel = FileChannel.open(path, StandardOpenOption.READ)) {
+                return new PartialModel(
+                        path.getFileName().toString(),
+                        ModelLoader.loadModel(fileChannel, gguf, Llama3.Options.DEFAULT_MAX_TOKENS, false),
+                        gguf.getTensorDataOffset(),
+                        gguf.getTensorInfos()
+                );
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Tries to reuse a compatible AOT preloaded model.
+     * The file name (base name) must match with the preloaded file name.
+     * No checksum/hash is checked for performance reasons.
+     */
+    public static Llama tryUsePreLoaded(Path modelPath, int contextLength) throws IOException {
+        AOT.PartialModel preLoaded = AOT.PRELOADED_GGUF;
+        if (preLoaded == null) {
+            return null; // no pre-loaded model stored
+        }
+        String optionsModel = modelPath.getFileName().toString();
+        String preLoadedModel = preLoaded.modelFileName();
+        if (!Objects.equals(optionsModel, preLoadedModel)) {
+            // Preloaded and specified model file names didn't match.
+            return null;
+        }
+        Llama baseModel = preLoaded.model();
+        try (var timer = Timer.log("Load tensors from pre-loaded model");
+             var fileChannel = FileChannel.open(modelPath, StandardOpenOption.READ)) {
+            // Load only the tensors (mmap slices).
+            Map<String, GGMLTensorEntry> tensorEntries = GGUF.loadTensors(fileChannel, preLoaded.tensorDataOffset(), preLoaded.tensorInfos());
+            Llama.Weights weights = ModelLoader.loadWeights(tensorEntries, baseModel.configuration());
+            return new Llama(baseModel.configuration().withContextLength(contextLength), baseModel.tokenizer(), weights);
+        }
+    }
+}
