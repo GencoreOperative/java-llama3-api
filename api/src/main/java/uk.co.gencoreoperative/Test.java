@@ -14,9 +14,15 @@ public class Test {
                 .build()
                 .parse(args);
 
+        System.out.println("Single Prompt Mode:");
         String prompt = "1 + 1 = ";
         System.out.print(prompt);
         Run runner = new Llama3Runner(config.modelPath);
         System.out.println(runner.run(prompt));
+
+        System.out.println("System and User Prompt Mode:");
+        System.out.print(prompt);
+        runner = new Llama3Runner(config.modelPath);
+        System.out.println(runner.run("Respond in binary", prompt));
     }
 }
