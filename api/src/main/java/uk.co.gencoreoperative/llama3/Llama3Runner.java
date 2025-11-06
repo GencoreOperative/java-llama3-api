@@ -25,9 +25,15 @@ import mukel.Llama3;
  */
 public class Llama3Runner implements Run {
     private final Path modelPath;
+    private final boolean showErrorOutput;
 
     public Llama3Runner(Path modelPath) {
+        this(modelPath, false);
+    }
+
+    public Llama3Runner(Path modelPath, boolean showError) {
         this.modelPath = modelPath;
+        this.showErrorOutput = showError;
     }
 
     /**
@@ -63,13 +69,18 @@ public class Llama3Runner implements Run {
         return llama3(args);
     }
 
-    private static String llama3(String[] args) {
-        return StdOutUtils.executeWithRedirect(() -> {
+    private String llama3(String[] args) {
+        Runnable runnable = () -> {
             try {
                 Llama3.main(args);
             } catch (IOException e) {
                 throw new RuntimeException(format("Failed to run Llama3: {0}", e.getMessage()), e);
             }
-        });
+        };
+        if (showErrorOutput) {
+            return StdOutUtils.execute(runnable);
+        } else {
+            return StdOutUtils.executeWithRedirect(runnable);
+        }
     }
 }
