@@ -8,7 +8,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.text.MessageFormat;
 import java.util.List;
 
 import com.google.gson.Gson;
@@ -45,7 +44,10 @@ public class WeatherTest {
             System.out.println(format("Weather Forecast: {0}", weather));
             String hourly = gson.toJson(weatherResponse.hourly);
 
-            Llama3Runner runner = new Llama3Runner(new File("Meta-Llama-3-8B-Instruct-Q4_0.gguf").toPath());
+            File currentDir = new File(System.getProperty("user.dir"));
+            File parentDir = currentDir.getAbsoluteFile().getParentFile();
+
+            Llama3Runner runner = new Llama3Runner(new File(parentDir, "Llama-3.2-1B-Instruct-Q4_0.gguf").toPath());
             String prompt = format("Answer only using Yes or No. Do I need an umbrella today?\n{0}", minify(hourly));
             System.out.println(prompt);
             System.out.println(format("Prompt Length: {0}", prompt.length()));
