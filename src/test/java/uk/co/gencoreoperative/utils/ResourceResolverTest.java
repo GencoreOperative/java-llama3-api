@@ -19,6 +19,6 @@ public class ResourceResolverTest {
         Path resolved = ResourceResolver.resolve("/badger");
 
         assertThat(resolved).exists();
-        assertThat(Files.readString(resolved).trim()).isEqualTo("badgers are best");
+        assertThat(Files.readString(resolved).trim()).isEqualTo("badgers are the best");
     }
 }
