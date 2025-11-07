@@ -71,7 +71,8 @@ Then, in your project, you can include the library as a dependency:
 ```
 
 Lastly, you need to have available the Llama3 Model file. This is a large file and is not included in this project but
-can be downloaded from [here](https://huggingface.co/mukel/Meta-Llama-3-8B-Instruct-GGUF).
+can be downloaded from [here](https://huggingface.co/mukel/Meta-Llama-3-8B-Instruct-GGUF). Alternatively, there is a 
+smaller model available [here](https://huggingface.co/mukel/Llama-3.2-1B-Instruct-GGUF).
 
 The following example code shows how you might invoke the library:
 ```java
