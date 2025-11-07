@@ -22,7 +22,7 @@ public class StdOutUtils {
      * @return The output from running the function will be returned.
      * @throws RuntimeException If there was an unexpected error thrown from the function.
      */
-    public static String executeWithRedirect(@Nonnull Runnable runnable) throws RuntimeException {
+    public static Result executeWithRedirect(@Nonnull Runnable runnable) throws RuntimeException {
         PrintStream previousOut = System.out;
         PrintStream previousErr = System.err;
         try (ByteArrayOutputStream out = new ByteArrayOutputStream(); ByteArrayOutputStream error = new ByteArrayOutputStream()) {
@@ -31,7 +31,7 @@ public class StdOutUtils {
 
             /*
             This shutdown hook is not going to contribute to the response from this method
-            It will only be used when the function calls System.exit(int)
+            It will only be used when the {@code runnable} calls System.exit(int)
             In this case, there is nothing we can do, but print the output and error
             so that the user can do something with it.
              */
@@ -52,7 +52,7 @@ public class StdOutUtils {
             } finally {
                 Runtime.getRuntime().removeShutdownHook(hook);
             }
-            return out.toString();
+            return new Result(out.toString(), error.toString());
         } catch (IOException e) {
             throw new RuntimeException(format("Unexpected IO Error: {0}", e.getMessage()), e);
         } finally {
@@ -95,4 +95,6 @@ public class StdOutUtils {
             System.setErr(previousErr);
         }
     }
+
+    public record Result(String out, String err){}
 }

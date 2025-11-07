@@ -18,11 +18,11 @@ public class Test {
         String prompt = "1 + 1 = ";
         System.out.print(prompt);
         Run runner = new Llama3Runner(config.modelPath);
-        System.out.println(runner.run(prompt));
+        System.out.println(runner.runWithResponse(prompt));
 
-        System.out.println("System and User Prompt Mode:");
-        System.out.print(prompt);
-        runner = new Llama3Runner(config.modelPath);
-        System.out.println(runner.run("Respond in binary", prompt));
+//        System.out.println("System and User Prompt Mode:");
+//        System.out.print(prompt);
+//        runner = new Llama3Runner(config.modelPath);
+//        System.out.println(runner.run("Respond in binary", prompt));
     }
 }

@@ -25,7 +25,7 @@ public class StdOutUtilsTest {
                     };
                 });
                 it("it is returned", () -> {
-                    String response = StdOutUtils.executeWithRedirect(function);
+                    String response = StdOutUtils.executeWithRedirect(function).out();
                     assertThat(response).isNotEmpty();
                 });
             });
@@ -36,7 +36,7 @@ public class StdOutUtilsTest {
                     };
                 });
                 it("it returns nothing", () -> {
-                    String response = StdOutUtils.executeWithRedirect(function);
+                    String response = StdOutUtils.executeWithRedirect(function).out();
                     assertThat(response).isEmpty();
                 });
             });
