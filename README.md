@@ -82,6 +82,12 @@ Run runner = new Llama3Runner(modelPath);
 System.out.println(runner.run(prompt));
 ```
 
+## Working with an LLM
+
+Performance is a key consideration when working with an LLM. The main driver on performance is both the size of the 
+input prompt and the size of the response from the LLM. This scales linearly such that larger requests take longer
+to process and larger responses take longer to output.
+
 ## License
 
 This project is licensed under the same license as the Llama3.java project, MIT License - see the 
