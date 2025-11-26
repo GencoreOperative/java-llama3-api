@@ -1,6 +1,22 @@
+# README Improvements
+The README needs to advertise the experience to the user earlier in the document. Show an example of what they 
+can achieve in as few lines of code as possible.
+
+# Demo Classes
+Introduce at least one, possibly more, demo classes that can be invoked from the command line that demonstrate
+useful capabilities. These can be part of our testing process as we develop more capability with the LLM.
+Demo - Question and Answer
+Demo - Write a Python Script
+Demo - Parse live JSON from a weather service
+
 # Context Window Response
 As part of processing, it would be valuable to inform the user of both the input size, context window usage, and
-output size. This would provide the caller with more programmatic capability.
+output size. This would provide the caller with more programmatic capability to understand how they are using the 
+LLM.
+
+Used - Tokens used during input
+Total - Context Window Size
+Output - Tokens generated in output
 
 # Context Window Control
 The Llama3 model has a context size of 512. This is artificially limited to reduce processing time. We should
