@@ -3,9 +3,12 @@ package uk.co.gencoreoperative.ai;
 import static java.text.MessageFormat.format;
 
 /**
+ * A {@link Response} from the LLM invocation.
+ * <p>
+ * When the LLM is invoked, this object will contain metrics about the request and response.
  *
- * @param response
- * @param context
+ * @param response The {@link String} response from the LLM which may contain new line characters.
+ * @param context {@link ContextWindow} containing response statistics.
  */
 public record Response(String response, ContextWindow context) {
     public int getRemainingWindow() {
