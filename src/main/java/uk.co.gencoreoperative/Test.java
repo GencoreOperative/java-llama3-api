@@ -24,7 +24,6 @@ public class Test {
         } else {
             response = runner.runWithResponse(config.prompt);
         }
-        System.out.println(response.response());
-        System.out.println(response.context());
+        System.out.println(response);
     }
 }

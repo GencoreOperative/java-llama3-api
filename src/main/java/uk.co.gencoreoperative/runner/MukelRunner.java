@@ -2,6 +2,9 @@ package uk.co.gencoreoperative.runner;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalUnit;
 import java.util.function.Consumer;
 
 import javax.annotation.Nonnull;
@@ -154,9 +157,13 @@ public class MukelRunner implements Run {
      */
     private Response invoke(String[] args) {
         Consumer<String[]> invocation = getConsumer(modelType);
+
+        // Time the run for reporting to the caller
+        long start = System.currentTimeMillis();
         StdOutUtils.Result result = StdOutUtils.executeWithRedirect(() -> {
             invocation.accept(args);
         });
+        Duration duration = Duration.of(System.currentTimeMillis() - start, ChronoUnit.MILLIS);
 
         // Parse the STDERR to extract the context window information.
         ContextWindow window = result.err()
@@ -166,6 +173,6 @@ public class MukelRunner implements Run {
                 .map(ContextParser::parseContext)
                 .orElseGet(() -> new ContextWindow(0,0));
 
-        return new Response(result.out(), window);
+        return new Response(result.out(), window, duration);
     }
 }
