@@ -2,6 +2,8 @@ package uk.co.gencoreoperative.ai;
 
 import static java.text.MessageFormat.format;
 
+import javax.annotation.Nonnull;
+
 /**
  * A {@link Response} from the LLM invocation.
  * <p>
@@ -16,8 +18,8 @@ public record Response(String response, ContextWindow context) {
     }
 
     @Override
-    public String toString() {
-        return format("{0} ({1} of {2} context window",
+    public @Nonnull String toString() {
+        return format("{0}\n({1} of {2} context window)",
                 response, context.used(), context.total());
     }
 }
