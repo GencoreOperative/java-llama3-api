@@ -23,10 +23,6 @@ The Llama3 model has a context size of 512. This is artificially limited to redu
 at least expose this as a capability that the user as control over to allow them to control compute spend.
 The model (Llama3 in this case) has a hard upper limit of 8K tokens which would factor into this.
 
-# Provide a Demo to exercise Capability
-The developer should aim to explore the capability of the GGUF model file before they attempt to integrate
-it into their project. A command line tool that allows them to test out their ideas would be helpful.
-
 # Chat Mode aka Multiple Requests
 If we can design the handling code so that it supports chat mode, then this will be more suitable for tasks
 where we are expecting to make repeated calls to the LLM. If we are keeping the context window short and using
@@ -60,3 +56,10 @@ We might need to document an additional argument for this.
 ```
 //RUNTIME_OPTIONS --add-modules=jdk.incubator.vector -Djdk.incubator.vector.VECTOR_ACCESS_OOB_CHECK=0
 ```
+
+# DONE: Provide a Demo to exercise Capability
+The developer should aim to explore the capability of the GGUF model file before they attempt to integrate
+it into their project. A command line tool that allows them to test out their ideas would be helpful.
+
+# DONE: Introduce timing of the LLM Invocation
+This enables a future test where we exercise how long it takes each model to run.
