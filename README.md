@@ -10,10 +10,11 @@ this capability.
 
 # AI Programming
 
-"Why call an AI from within a Java application?"
+_"Why call an AI from within a Java application?"_
 
 Large Language Models (LLM) bring multiple potential benefits to developers:
 - Natural Language Processing: enables the AI to work with human text
+- Interpretation: Where we want to make decisions based on the user's input, LLMs might present useful functionality
 - Decision-Making: By providing text to the AI, we can ask it to make decisions that inform program behaviour
 
 A simple use case of this idea might be a simple program that retrieves a weather forecast in JSON format,
@@ -24,7 +25,7 @@ umbrella?"
 
 - Java JDK 21 or higher
 - Maven 3.x or higher
-- Make & Docker (optional)
+- One of the supported LLM models downloaded locally
 
 # Example
 
@@ -48,16 +49,26 @@ Because it was a pine tree!
 In this case, the Qwen2.5 0.5B model is somewhat 'limited' in its ability to tell jokes, but this example
 serves to show the minimum amount of code required to execute a LLM inside Java.
 
-### Building
+## Downloading Q4_0 GGUF Model
 
-The simplest way to build the project is to use the provided Makefile.
-This will invoke a Docker Maven image that contains the right version of Java to build the project.
+This project is designed to work with LLM models in the GGUF format that have been quantized to 4-bit.
+Mukel has helpfully provided a repository that contains suitable models to select from:
 
-```commandline
-make build
-```
+* [Llama3+](https://huggingface.co/collections/mukel/llama-3)
+* [Qwen 2.5](https://huggingface.co/collections/mukel/qwen-25)
 
-Alternatively, if you already have Java 21 installed, then you can build using the standard Maven command:
+The following are a selection that may be of interest:
+
+* 344MB [mukel/Qwen2.5-0.5B-Instruct-Q4_0.gguf](https://huggingface.co/mukel/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_0.gguf?download=true)
+* 671MB [mukel/Llama-3.2-1B-Instruct-GGUF](https://huggingface.co/mukel/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_0.gguf?download=true)
+* 960MB [mukel/Qwen2.5-1.5B-Instruct-GGUF](https://huggingface.co/mukel/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_0.gguf?download=true)
+
+As you increase the file size of the model, we generally expect to find more capability.
+
+## Building
+
+The simplest way to build the project is to have Java and Maven installed and build the project using the provided
+`pom.xml` file.
 
 ```commandline
 mvn package
@@ -69,9 +80,9 @@ To demonstrate that the project is working, a simple test class has been provide
 with a basic maths question:
 
 ```commandline
-make run
+./test --model Qwen2.5-0.5B-Instruct-Q4_0.gguf --prompt "1 + 1 = ?"
 ```
-This will output the following:
+This will output something that might look as follows:
 ```commandline
 1 + 1 = 2
 ```
@@ -90,7 +101,7 @@ Then, in your project, you can include the library as a dependency:
 ```xml
 <dependency>
     <groupId>uk.co.gencoreoperative</groupId>
-    <artifactId>java-llama3-api</artifactId>
+    <artifactId>java-mukel-api</artifactId>
     <version>1.0-SNAPSHOT</version>
 </dependency>
 ```
