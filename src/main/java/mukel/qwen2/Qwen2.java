@@ -1091,6 +1091,9 @@ record Llama(Configuration configuration, Qwen2Tokenizer tokenizer, Weights weig
         long elapsedNanos = System.nanoTime() - startNanos;
         int totalTokens = promptIndex + generatedTokens.size();
         System.err.printf("%n%.2f tokens/s (%d)%n", totalTokens / (elapsedNanos / 1_000_000_000.0), totalTokens);
+        // Adding in context information for consistency between Llama3 and Qwen2
+        System.err.printf("%ncontext: %d/%d %n",
+                startPosition + promptIndex + generatedTokens.size(), model.configuration().contextLength);
 
         return generatedTokens;
     }
