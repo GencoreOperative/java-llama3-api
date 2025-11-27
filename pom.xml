@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>uk.co.gencoreoperative</groupId>
-    <artifactId>java-llama3-api</artifactId>
+    <artifactId>java-mukel-api</artifactId>
     <version>1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
@@ -115,9 +115,33 @@
                             <minimizeJar>true</minimizeJar>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>uk.co.gencoreoperative.SimpleTest</mainClass>
+                                    <mainClass>uk.co.gencoreoperative.Test</mainClass>
                                 </transformer>
                             </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Prepend the shell script to the jar -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>run-prepend-script</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <exec executable="${project.basedir}/executable.sh">
+                                    <arg value="${project.build.directory}/${project.build.finalName}.jar"/>
+                                    <arg value="${project.basedir}/test"/>
+                                </exec>
+                            </target>
                         </configuration>
                     </execution>
                 </executions>

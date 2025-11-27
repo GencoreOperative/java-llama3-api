@@ -2,8 +2,11 @@
 
 This Java-based project aims to provide a simple API that developers can use to invoke an AI from within 
 the JVM. The primary implementation for this API is the excellent work of [Murkel](https://github.com/mukel) 
-in their [Llama3 project](https://github.com/mukel/llama3.java). In the future, as additional Java based 
-inference engines become available, we may consider updating this API.
+in their [Llama3 project](https://github.com/mukel/llama3.java) and 
+[Qwen2 project](https://github.com/mukel/qwen2.svm.java).
+
+This project acts as an API wrapper around these projects to provide a simplified way for developers to access
+this capability.
 
 # AI Programming
 
@@ -25,9 +28,25 @@ umbrella?"
 
 # Example
 
-```java
+The following three lines of Java show how we can both initialise the model, in this case a Qwen2.5 0.5B model
+and then invoke it with a single prompt.
 
+```java
+File model = new File(System.getProperty("user.dir"), "Qwen2.5-0.5B-Instruct-Q4_0.gguf");
+MukelRunner runner = new MukelRunner(model.toPath());
+System.out.println(runner.run("Tell me a joke"));
 ```
+
+```commandline
+Sure, here's a joke for you:
+
+Why was the whole village wrong about the big tree?
+
+Because it was a pine tree!
+```
+
+In this case, the Qwen2.5 0.5B model is somewhat 'limited' in its ability to tell jokes, but this example
+serves to show the minimum amount of code required to execute a LLM inside Java.
 
 ### Building
 

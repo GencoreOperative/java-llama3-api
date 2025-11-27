@@ -7,4 +7,10 @@ import com.beust.jcommander.Parameter;
 public class Config {
     @Parameter(names = {"--model", "-m"}, description = "required, path to .gguf file", required = true)
     public Path modelPath;
+
+    @Parameter(names = {"--system-prompt", "-s"}, description = "System Prompt for the LLM", required = false)
+    public String systemPrompt;
+
+    @Parameter(description = "User Prompt for the LLM", required = true)
+    public String prompt;
 }
