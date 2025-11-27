@@ -110,13 +110,16 @@ Lastly, you need to have available the Llama3 Model file. This is a large file a
 can be downloaded from [here](https://huggingface.co/mukel/Meta-Llama-3-8B-Instruct-GGUF). Alternatively, there is a 
 smaller model available [here](https://huggingface.co/mukel/Llama-3.2-1B-Instruct-GGUF).
 
-The following example code shows how you might invoke the library:
-```java
-String prompt = "your prompt here";
-Path modelPath = "path to model file here";
-Run runner = new Llama3Runner(modelPath);
-System.out.println(runner.run(prompt));
+### Running from Java
+
+When invoking the code from Java directly, for example from within an IDE, it is necessary to include the following arguments in the JVM arguments:
+
 ```
+--add-modules=jdk.incubator.vector -Djdk.incubator.vector.VECTOR_ACCESS_OOB_CHECK=0
+```
+
+This is required because the underlying Llama3.java library makes use of the Vector API, which is an incubator feature in JDK 21.
+
 
 ## Working with an LLM
 
