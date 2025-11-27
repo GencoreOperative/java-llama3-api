@@ -17,7 +17,7 @@
 // jbang Llama3.java --help
 //
 // Enjoy!
-package mukel;
+package mukel.llama3;
 
 import jdk.incubator.vector.*;
 import sun.misc.Unsafe;

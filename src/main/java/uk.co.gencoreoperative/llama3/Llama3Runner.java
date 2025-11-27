@@ -4,7 +4,6 @@ import static java.text.MessageFormat.format;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.Optional;
 
 import javax.annotation.Nonnull;
 
@@ -13,7 +12,7 @@ import uk.co.gencoreoperative.ai.Response;
 import uk.co.gencoreoperative.ai.Run;
 import uk.co.gencoreoperative.utils.ContextParser;
 import uk.co.gencoreoperative.utils.StdOutUtils;
-import mukel.Llama3;
+import mukel.llama3.Llama3;
 
 /**
  * Based on the excellent work by <a href="https://github.com/mukel/llama3.java>mukel</a>,
@@ -22,7 +21,7 @@ import mukel.Llama3;
  * The code provided was intended for use on the command line. This class adapts this by
  * capturing the output of the model and returning it as a string.
  * <p>
- * The Llama3.java library we are using is best invoked using its {@link mukel.Llama3#main(String[])}
+ * The Llama3.java library we are using is best invoked using its {@link Llama3#main(String[])}
  * method. This call will generate stdout and stderr that will be re-diverted to simplify the
  * experience for the caller. From the caller's perspective, we are only interested in the output
  * of the model.
