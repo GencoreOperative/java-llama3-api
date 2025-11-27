@@ -1,5 +1,9 @@
 package uk.co.gencoreoperative.ai;
 
+import static java.text.MessageFormat.format;
+
+import javax.annotation.Nonnull;
+
 /**
  * Indication of the amount of input context that is used by the request to the LLM.
  *
@@ -8,10 +12,7 @@ package uk.co.gencoreoperative.ai;
  */
 public record ContextWindow(int used, int total) {
     @Override
-    public String toString() {
-        return "ContextWindow{" +
-                "used=" + used +
-                ", total=" + total +
-                '}';
+    public @Nonnull String toString() {
+        return format("ContextWindow(used={0}, total={1})", used, total);
     }
 }

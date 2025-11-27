@@ -17,7 +17,7 @@ public class Test {
                 .build()
                 .parse(args);
 
-        MukelRunner runner = new MukelRunner(config.modelPath);
+        MukelRunner runner = new MukelRunner(config.modelPath, config.temperature);
         Response response;
         if (config.systemPrompt != null) {
             response = runner.runWithResponse(config.systemPrompt, config.prompt);

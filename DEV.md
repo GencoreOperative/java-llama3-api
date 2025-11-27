@@ -63,3 +63,7 @@ it into their project. A command line tool that allows them to test out their id
 
 # DONE: Introduce timing of the LLM Invocation
 This enables a future test where we exercise how long it takes each model to run.
+
+# DONE: Introduce a temperature control
+At the moment, each invocation, at least for simple invocations appears to be identical.
+We can make use of the temperature control to influence this.
