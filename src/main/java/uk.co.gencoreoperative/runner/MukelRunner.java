@@ -1,12 +1,12 @@
 package uk.co.gencoreoperative.runner;
 
-import static java.text.MessageFormat.format;
-
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.function.Consumer;
 
 import javax.annotation.Nonnull;
 
+import mukel.qwen2.Qwen2;
 import uk.co.gencoreoperative.ai.ContextWindow;
 import uk.co.gencoreoperative.ai.Response;
 import uk.co.gencoreoperative.ai.Run;
@@ -27,7 +27,6 @@ import mukel.llama3.Llama3;
  */
 public class MukelRunner implements Run {
     private final Path modelPath;
-    private final boolean showErrorOutput;
 
     public MukelRunner(Path modelPath) {
         this(modelPath, false);
@@ -35,7 +34,37 @@ public class MukelRunner implements Run {
 
     public MukelRunner(Path modelPath, boolean showError) {
         this.modelPath = modelPath;
-        this.showErrorOutput = showError;
+    }
+
+    /**
+     * 
+     * @param modelPath
+     * @return
+     */
+    private Consumer<String[]> validateModelPath(Path modelPath) {
+        String lowerCaseName = modelPath.getFileName().toString().toLowerCase();
+        if (!lowerCaseName.contains("q4_0")) throw new IllegalArgumentException("Model must be a Q4_0 model");
+        if (!lowerCaseName.endsWith(".gguf")) throw new IllegalArgumentException("Model must be a .gguf file");
+
+        if (lowerCaseName.contains("qwen2")) {
+            return args -> {
+                try {
+                    Qwen2.main(args);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            };
+        } else if (lowerCaseName.contains("llama-3")) {
+            return args -> {
+                try {
+                    Llama3.main(args);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            };
+        } else {
+            throw new IllegalArgumentException("Model must be a Qwen2 or Llama3 model");
+        }
     }
 
     /**
@@ -65,7 +94,7 @@ public class MukelRunner implements Run {
                 "--instruct",
                 "--prompt", prompt
         };
-        return llama3(args);
+        return invoke(args);
     }
 
     /**
@@ -97,7 +126,7 @@ public class MukelRunner implements Run {
                 "--system-prompt", system,
                 "--prompt", user
         };
-        return llama3(args);
+        return invoke(args);
     }
 
     /**
@@ -105,15 +134,11 @@ public class MukelRunner implements Run {
      * @param args The {@link String} arguments to pass to the {@link Llama3#main(String[])} method.
      * @return A {@link Response} object containing the model's output and metadata.
      */
-    private Response llama3(String[] args) {
-        Runnable runnable = () -> {
-            try {
-                Llama3.main(args);
-            } catch (IOException e) {
-                throw new RuntimeException(format("Failed to run Llama3: {0}", e.getMessage()), e);
-            }
-        };
-        StdOutUtils.Result result = StdOutUtils.executeWithRedirect(runnable);
+    private Response invoke(String[] args) {
+        Consumer<String[]> invocation = validateModelPath(modelPath);
+        StdOutUtils.Result result = StdOutUtils.executeWithRedirect(() -> {
+            invocation.accept(args);
+        });
 
         // Parse the STDERR to extract the context window information.
         ContextWindow window = result.err()
