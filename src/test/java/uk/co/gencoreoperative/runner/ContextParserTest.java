@@ -1,4 +1,4 @@
-package uk.co.gencoreoperative.utils;
+package uk.co.gencoreoperative.runner;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

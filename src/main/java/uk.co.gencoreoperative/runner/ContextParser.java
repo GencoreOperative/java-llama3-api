@@ -1,4 +1,4 @@
-package uk.co.gencoreoperative.utils;
+package uk.co.gencoreoperative.runner;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -6,7 +6,7 @@ import java.util.regex.Pattern;
 import uk.co.gencoreoperative.ai.ContextWindow;
 
 /**
- * Utility class for parsing the Llama3 context window information.
+ * Utility class for parsing the Mukel Llama3/Qwen2 context window information.
  * <p>
  * This class provides methods to identify and extract context window usage from strings
  * typically formatted as "context: <used>/<total> ...". The extracted values are returned

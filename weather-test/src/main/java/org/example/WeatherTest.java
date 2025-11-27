@@ -14,7 +14,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 
-import uk.co.gencoreoperative.llama3.Llama3Runner;
+import uk.co.gencoreoperative.runner.Llama3Runner;
 
 public class WeatherTest {
     public static void main(String... args) throws IOException, InterruptedException {

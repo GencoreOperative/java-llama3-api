@@ -1,4 +1,4 @@
-package uk.co.gencoreoperative.llama3;
+package uk.co.gencoreoperative.runner;
 
 import static java.text.MessageFormat.format;
 
@@ -10,7 +10,6 @@ import javax.annotation.Nonnull;
 import uk.co.gencoreoperative.ai.ContextWindow;
 import uk.co.gencoreoperative.ai.Response;
 import uk.co.gencoreoperative.ai.Run;
-import uk.co.gencoreoperative.utils.ContextParser;
 import uk.co.gencoreoperative.utils.StdOutUtils;
 import mukel.llama3.Llama3;
 
@@ -26,15 +25,15 @@ import mukel.llama3.Llama3;
  * experience for the caller. From the caller's perspective, we are only interested in the output
  * of the model.
  */
-public class Llama3Runner implements Run {
+public class MukelRunner implements Run {
     private final Path modelPath;
     private final boolean showErrorOutput;
 
-    public Llama3Runner(Path modelPath) {
+    public MukelRunner(Path modelPath) {
         this(modelPath, false);
     }
 
-    public Llama3Runner(Path modelPath, boolean showError) {
+    public MukelRunner(Path modelPath, boolean showError) {
         this.modelPath = modelPath;
         this.showErrorOutput = showError;
     }
