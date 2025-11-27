@@ -23,6 +23,12 @@ umbrella?"
 - Maven 3.x or higher
 - Make & Docker (optional)
 
+# Example
+
+```java
+
+```
+
 ### Building
 
 The simplest way to build the project is to use the provided Makefile.

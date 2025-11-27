@@ -27,13 +27,19 @@ import mukel.llama3.Llama3;
  */
 public class MukelRunner implements Run {
     private final Path modelPath;
+    private ModelType modelType;
 
     public MukelRunner(Path modelPath) {
         this(modelPath, false);
     }
 
     public MukelRunner(Path modelPath, boolean showError) {
+        modelType = validateModelPath(modelPath);
         this.modelPath = modelPath;
+    }
+
+    public String getModelName() {
+        return modelType.name();
     }
 
     /**
@@ -41,29 +47,41 @@ public class MukelRunner implements Run {
      * @param modelPath
      * @return
      */
-    private Consumer<String[]> validateModelPath(Path modelPath) {
+    private ModelType validateModelPath(Path modelPath) {
         String lowerCaseName = modelPath.getFileName().toString().toLowerCase();
         if (!lowerCaseName.contains("q4_0")) throw new IllegalArgumentException("Model must be a Q4_0 model");
         if (!lowerCaseName.endsWith(".gguf")) throw new IllegalArgumentException("Model must be a .gguf file");
 
         if (lowerCaseName.contains("qwen2")) {
-            return args -> {
-                try {
-                    Qwen2.main(args);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            };
+            return ModelType.QWEN2;
         } else if (lowerCaseName.contains("llama-3")) {
-            return args -> {
-                try {
-                    Llama3.main(args);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            };
+            return ModelType.LLAMA3;
         } else {
             throw new IllegalArgumentException("Model must be a Qwen2 or Llama3 model");
+        }
+    }
+
+    private Consumer<String[]> getConsumer(ModelType type) {
+        switch (type) {
+            case QWEN2 -> {
+                return args -> {
+                    try {
+                        Qwen2.main(args);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                };
+            }
+            case LLAMA3 -> {
+                return args -> {
+                    try {
+                        Llama3.main(args);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                };
+            }
+            default -> throw new IllegalArgumentException("Model must be a Qwen2 or Llama3 model");
         }
     }
 
@@ -135,7 +153,7 @@ public class MukelRunner implements Run {
      * @return A {@link Response} object containing the model's output and metadata.
      */
     private Response invoke(String[] args) {
-        Consumer<String[]> invocation = validateModelPath(modelPath);
+        Consumer<String[]> invocation = getConsumer(modelType);
         StdOutUtils.Result result = StdOutUtils.executeWithRedirect(() -> {
             invocation.accept(args);
         });

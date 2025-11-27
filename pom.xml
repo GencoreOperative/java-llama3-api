@@ -115,7 +115,7 @@
                             <minimizeJar>true</minimizeJar>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>uk.co.gencoreoperative.Test</mainClass>
+                                    <mainClass>uk.co.gencoreoperative.SimpleTest</mainClass>
                                 </transformer>
                             </transformers>
                         </configuration>

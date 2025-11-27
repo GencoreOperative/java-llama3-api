@@ -9,7 +9,7 @@ import uk.co.gencoreoperative.runner.MukelRunner;
 /**
  * A demonstration class that shows how we can invoke the LLM from within a Java application.
  */
-public class Test {
+public class SimpleTest {
     static void main(String... args) {
         Config config = new Config();
         JCommander.newBuilder()
