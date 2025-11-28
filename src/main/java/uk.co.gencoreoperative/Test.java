@@ -20,10 +20,12 @@ public class Test {
         MukelRunner runner = new MukelRunner(config.modelPath, config.temperature);
         Response response;
         if (config.systemPrompt != null) {
-            response = runner.runWithResponse(config.systemPrompt, config.prompt);
+//            response = runner.runWithResponse(config.systemPrompt, config.prompt);
+            runner.runAsStream(config.systemPrompt, config.prompt).forEach(System.out::print);
         } else {
-            response = runner.runWithResponse(config.prompt);
+//            response = runner.runWithResponse(config.prompt);
+            runner.runAsStream(config.prompt).forEach(System.out::print);
         }
-        System.out.println(response);
+//        System.out.println(response);
     }
 }

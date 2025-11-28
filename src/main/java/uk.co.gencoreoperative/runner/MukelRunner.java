@@ -3,19 +3,28 @@ package uk.co.gencoreoperative.runner;
 import static uk.co.gencoreoperative.runner.ModelType.*;
 
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import mukel.qwen2.Qwen2;
 import uk.co.gencoreoperative.ai.ContextWindow;
 import uk.co.gencoreoperative.ai.Response;
 import uk.co.gencoreoperative.ai.Run;
+import uk.co.gencoreoperative.utils.BlockingQueueIterator;
+import uk.co.gencoreoperative.utils.QueuingOutputStream;
+import uk.co.gencoreoperative.utils.RunAsync;
 import uk.co.gencoreoperative.utils.StdOutUtils;
 import mukel.llama3.Llama3;
 
@@ -104,7 +113,7 @@ public class MukelRunner implements Run {
      */
     @Override
     public String run(@Nonnull String prompt) {
-        return runWithResponse(prompt).response();
+        return runAsStream(prompt).collect(Collectors.joining());
     }
 
     /**
@@ -129,7 +138,7 @@ public class MukelRunner implements Run {
      * @return The output of the model if any.
      */
     public String run(@Nonnull String system, @Nonnull String user) {
-        return runWithResponse(system, user).response();
+        return runAsStream(system, user).collect(Collectors.joining());
     }
 
     /**
@@ -147,10 +156,50 @@ public class MukelRunner implements Run {
         return invoke(buildArgs(system, user, temperature));
     }
 
-    private String[] buildArgs(String system, String user, float temperature) {
+    public Stream<String> runAsStream(@Nonnull String prompt) {
+        return runAsStream(null, prompt);
+    }
+
+    public Stream<String> runAsStream(@Nullable String system, @Nonnull String prompt) {
+        BlockingQueueIterator iterator = new BlockingQueueIterator();
+        String[] args = buildArgs(system, prompt, temperature);
+        RunAsync.runAsync(getInvoker(args, iterator));
+        return BlockingQueueIterator.createStream(iterator);
+    }
+
+    private Runnable getInvoker(String[] args, BlockingQueueIterator iterator) {
+        if (modelType == LLAMA3) {
+            return () -> {
+                Llama3.STDOUT = QueuingOutputStream.createStream(iterator.getQueue());
+                try {
+                    Llama3.main(args);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                } finally {
+                    iterator.setEnd();
+                }
+            };
+        } else if (modelType == QWEN2) {
+            return () -> {
+                Qwen2.STDOUT = QueuingOutputStream.createStream(iterator.getQueue());
+                try {
+                    Qwen2.main(args);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                } finally {
+                    iterator.setEnd();
+                }
+            };
+        }
+        throw new IllegalStateException();
+    }
+
+    private String[] buildArgs(@Nullable String system, String user, float temperature) {
         List<String> args = new ArrayList<>();
         args.add("--model");
         args.add(modelPath.toString());
+        args.add("--temperature");
+        args.add(Float.toString(temperature));
         args.add("--instruct");
         if (system != null) {
             args.add("--system-prompt");

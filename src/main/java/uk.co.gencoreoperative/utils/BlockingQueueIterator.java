@@ -1,7 +1,14 @@
 package uk.co.gencoreoperative.utils;
 
+import static java.util.Spliterator.ORDERED;
+import static java.util.Spliterators.spliteratorUnknownSize;
+
 import java.util.Iterator;
+import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 /**
  * An {@link Iterator} that will iterate over the contents of the provided
@@ -12,12 +19,12 @@ import java.util.concurrent.BlockingQueue;
  * being consumed.
  */
 public class BlockingQueueIterator implements Iterator<String> {
-    private final BlockingQueue<String> queue;
+    private final BlockingQueue<String> queue = new LinkedBlockingQueue<>();
     private final String END_SIGNAL = "END_SIGNAL";
     private String next = null;
 
-    public BlockingQueueIterator(BlockingQueue<String> queue) {
-        this.queue = queue;
+    public Queue<String> getQueue() {
+        return queue;
     }
 
     public void setEnd() {
@@ -44,5 +51,9 @@ public class BlockingQueueIterator implements Iterator<String> {
         String value = next;
         next = null;
         return value;
+    }
+
+    public static Stream<String> createStream(BlockingQueueIterator iterator) {
+        return StreamSupport.stream(spliteratorUnknownSize(iterator, ORDERED), false);
     }
 }

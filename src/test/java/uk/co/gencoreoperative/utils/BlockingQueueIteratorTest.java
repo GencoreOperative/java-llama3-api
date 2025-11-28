@@ -14,19 +14,17 @@ import org.junit.runner.RunWith;
 
 @RunWith(CuppaRunner.class)
 public class BlockingQueueIteratorTest {
-    private BlockingQueue<String> queue;
     private BlockingQueueIterator iterator;
 
     {
         describe(BlockingQueueIterator.class.getSimpleName(), () -> {
             beforeEach(() -> {
-                queue = new LinkedBlockingQueue<>();
-                iterator = new BlockingQueueIterator(queue);
+                iterator = new BlockingQueueIterator();
             });
             when("there is a queue of items", () -> {
                 beforeEach(() -> {
-                    queue.add("Hello");
-                    queue.add("World");
+                    iterator.getQueue().add("Hello");
+                    iterator.getQueue().add("World");
                     iterator.setEnd();
                 });
                 it("iterates over each of them", () -> {
