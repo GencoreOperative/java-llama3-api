@@ -40,6 +40,8 @@ import java.util.stream.Stream;
 
 
 public class Qwen2 {
+    public static PrintStream STDOUT = System.out;
+    public static PrintStream STDERR = System.err;
 
     static Sampler selectSampler(int vocabularySize, float temperature, float topp, long rngSeed) {
         Sampler sampler;
@@ -79,8 +81,8 @@ public class Qwen2 {
         int startPosition = 0;
         Scanner in = new Scanner(System.in);
         while (true) {
-            System.out.print("> ");
-            System.out.flush();
+            Qwen2.STDOUT.print("> ");
+            Qwen2.STDOUT.flush();
             if (state == null) {
                 // State allocation can take some time for large context sizes,
                 // allocate the model state only after printing the user '>' prompt.
@@ -97,7 +99,7 @@ public class Qwen2 {
                 if (options.stream()) {
                     int tokenType = model.tokenizer().getTokenType(token);
                     if (tokenType == 1 || tokenType == 6) {
-                        System.out.print(model.tokenizer().decode(List.of(token)));
+                        Qwen2.STDOUT.print(model.tokenizer().decode(List.of(token)));
                     }
                 }
             });
@@ -111,10 +113,10 @@ public class Qwen2 {
             }
             if (!options.stream()) {
                 String responseText = model.tokenizer().decode(responseTokens);
-                System.out.println(responseText);
+                Qwen2.STDOUT.println(responseText);
             }
             if (stopToken == null) {
-                System.err.println("Ran out of context length...");
+                Qwen2.STDERR.println("Ran out of context length...");
                 break;
             }
         }
@@ -135,7 +137,7 @@ public class Qwen2 {
             if (options.stream()) {
                 int tokenType = model.tokenizer().getTokenType(token);
                 if (tokenType == 1 || tokenType == 6) {
-                    System.out.print(model.tokenizer().decode(List.of(token)));
+                    Qwen2.STDOUT.print(model.tokenizer().decode(List.of(token)));
                 }
             }
         });
@@ -144,7 +146,7 @@ public class Qwen2 {
         }
         if (!options.stream()) {
             String responseText = model.tokenizer().decode(responseTokens);
-            System.out.println(responseText);
+            Qwen2.STDOUT.println(responseText);
         }
     }
 
@@ -160,9 +162,9 @@ public class Qwen2 {
 
         static void require(boolean condition, String messageFormat, Object... args) {
             if (!condition) {
-                System.out.println("ERROR " + messageFormat.formatted(args));
-                System.out.println();
-                printUsage(System.out);
+                Qwen2.STDOUT.println("ERROR " + messageFormat.formatted(args));
+                Qwen2.STDOUT.println();
+                printUsage(Qwen2.STDOUT);
                 System.exit(-1);
             }
         }
@@ -211,7 +213,7 @@ public class Qwen2 {
                 case "--interactive", "--chat", "-i" -> interactive = true;
                 case "--instruct" -> interactive = false;
                 case "--help", "-h" -> {
-                    printUsage(System.out);
+                    printUsage(Qwen2.STDOUT);
                     System.exit(0);
                 }
                 default -> {
@@ -624,7 +626,7 @@ interface Timer extends AutoCloseable {
             @Override
             public void close() {
                 long elapsedNanos = System.nanoTime() - startNanos;
-                System.err.println(label + ": "
+                Qwen2.STDERR.println(label + ": "
                         + timeUnit.convert(elapsedNanos, TimeUnit.NANOSECONDS) + " "
                         + timeUnit.toChronoUnit().name().toLowerCase());
             }
@@ -1069,13 +1071,13 @@ record Llama(Configuration configuration, Qwen2Tokenizer tokenizer, Weights weig
                 nextToken = promptTokens.get(promptIndex++);
                 if (echo) {
                     // log prompt token (different color?)
-                    System.err.print(Qwen2Tokenizer.replaceControlCharacters(model.tokenizer().decode(List.of(nextToken))));
+                    Qwen2.STDERR.print(Qwen2Tokenizer.replaceControlCharacters(model.tokenizer().decode(List.of(nextToken))));
                 }
             } else {
                 nextToken = sampler.sampleToken(state.logits);
                 if (echo) {
                     // log inferred token
-                    System.err.print(Qwen2Tokenizer.replaceControlCharacters(model.tokenizer().decode(List.of(nextToken))));
+                    Qwen2.STDERR.print(Qwen2Tokenizer.replaceControlCharacters(model.tokenizer().decode(List.of(nextToken))));
                 }
                 generatedTokens.add(nextToken);
                 if (onTokenGenerated != null) {
@@ -1090,9 +1092,9 @@ record Llama(Configuration configuration, Qwen2Tokenizer tokenizer, Weights weig
 
         long elapsedNanos = System.nanoTime() - startNanos;
         int totalTokens = promptIndex + generatedTokens.size();
-        System.err.printf("%n%.2f tokens/s (%d)%n", totalTokens / (elapsedNanos / 1_000_000_000.0), totalTokens);
+        Qwen2.STDERR.printf("%n%.2f tokens/s (%d)%n", totalTokens / (elapsedNanos / 1_000_000_000.0), totalTokens);
         // Adding in context information for consistency between Llama3 and Qwen2
-        System.err.printf("%ncontext: %d/%d %n",
+        Qwen2.STDERR.printf("%ncontext: %d/%d %n",
                 startPosition + promptIndex + generatedTokens.size(), model.configuration().contextLength);
 
         return generatedTokens;

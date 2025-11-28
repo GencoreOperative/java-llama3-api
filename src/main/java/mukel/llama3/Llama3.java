@@ -52,6 +52,8 @@ import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
 public class Llama3 {
+    public static PrintStream STDOUT = System.out;
+    public static PrintStream STDERR = System.err;
     // Batch-size used in prompt evaluation.
     private static final int BATCH_SIZE = Integer.getInteger("llama.BatchSize", 16);
 
@@ -93,14 +95,14 @@ public class Llama3 {
         int startPosition = 0;
         Scanner in = new Scanner(System.in);
         loop: while (true) {
-            System.out.print("> ");
-            System.out.flush();
+            STDOUT.print("> ");
+            STDOUT.flush();
             String userText = in.nextLine();
             switch (userText) {
                 case "/quit":
                 case "/exit": break loop;
                 case "/context": {
-                    System.out.printf("%d out of %d context tokens used (%d tokens remaining)%n",
+                    STDOUT.printf("%d out of %d context tokens used (%d tokens remaining)%n",
                             conversationTokens.size(),
                             options.maxTokens(),
                             options.maxTokens() - conversationTokens.size());
@@ -116,7 +118,7 @@ public class Llama3 {
             List<Integer> responseTokens = Llama.generateTokens(model, state, startPosition, conversationTokens.subList(startPosition, conversationTokens.size()), stopTokens, options.maxTokens(), sampler, options.echo(), token -> {
                 if (options.stream()) {
                     if (!model.tokenizer().isSpecialToken(token)) {
-                        System.out.print(model.tokenizer().decode(List.of(token)));
+                        STDOUT.print(model.tokenizer().decode(List.of(token)));
                     }
                 }
             });
@@ -130,10 +132,10 @@ public class Llama3 {
             }
             if (!options.stream()) {
                 String responseText = model.tokenizer().decode(responseTokens);
-                System.out.println(responseText);
+                STDOUT.println(responseText);
             }
             if (stopToken == null) {
-                System.err.println("Ran out of context length...");
+                STDERR.println("Ran out of context length...");
                 break;
             }
         }
@@ -155,7 +157,7 @@ public class Llama3 {
         List<Integer> responseTokens = Llama.generateTokens(model, state, 0, promptTokens, stopTokens, options.maxTokens(), sampler, options.echo(), token -> {
             if (options.stream()) {
                 if (!model.tokenizer().isSpecialToken(token)) {
-                    System.out.print(model.tokenizer().decode(List.of(token)));
+                    STDOUT.print(model.tokenizer().decode(List.of(token)));
                 }
             }
         });
@@ -164,7 +166,7 @@ public class Llama3 {
         }
         if (!options.stream()) {
             String responseText = model.tokenizer().decode(responseTokens);
-            System.out.println(responseText);
+            STDOUT.println(responseText);
         }
     }
 
@@ -182,9 +184,9 @@ public class Llama3 {
 
         static void require(boolean condition, String messageFormat, Object... args) {
             if (!condition) {
-                System.out.println("ERROR " + messageFormat.formatted(args));
-                System.out.println();
-                printUsage(System.out);
+                STDOUT.println("ERROR " + messageFormat.formatted(args));
+                STDOUT.println();
+                printUsage(STDOUT);
                 System.exit(-1);
             }
         }
@@ -233,7 +235,7 @@ public class Llama3 {
                     case "--interactive", "--chat", "-i" -> interactive = true;
                     case "--instruct" -> interactive = false;
                     case "--help", "-h" -> {
-                        printUsage(System.out);
+                        printUsage(STDOUT);
                         System.exit(0);
                     }
                     default -> {
@@ -658,7 +660,7 @@ interface Timer extends AutoCloseable {
             @Override
             public void close() {
                 long elapsedNanos = System.nanoTime() - startNanos;
-                System.err.println(label + ": "
+                Llama3.STDERR.println(label + ": "
                         + timeUnit.convert(elapsedNanos, TimeUnit.NANOSECONDS) + " "
                         + timeUnit.toChronoUnit().name().toLowerCase());
             }
@@ -1150,11 +1152,11 @@ record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) 
                     tokens[i] = promptTokens.get(promptIndex + i);
                     if (echo) {
                         // log prompt token (different color?)
-                        System.err.print(Tokenizer.replaceControlCharacters(model.tokenizer().decode(List.of(tokens[i]))));
+                        Llama3.STDERR.print(Tokenizer.replaceControlCharacters(model.tokenizer().decode(List.of(tokens[i]))));
                     }
                 }
                 if (echo) {
-                    System.out.format("position=%d, promptIdx=%d, promptSize=%d, tokens=%s%n", position, promptIndex, promptTokens.size(), Arrays.toString(tokens));
+                    Llama3.STDOUT.format("position=%d, promptIdx=%d, promptSize=%d, tokens=%s%n", position, promptIndex, promptTokens.size(), Arrays.toString(tokens));
                 }
                 // Only compute logits on the very last batch.
                 boolean computeLogits = promptIndex + nTokens >= promptTokens.size();
@@ -1171,7 +1173,7 @@ record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) 
             nextToken = sampler.sampleToken(state.logits);
             if (echo) {
                 // log inferred token
-                System.err.print(Tokenizer.replaceControlCharacters(model.tokenizer().decode(List.of(nextToken))));
+                Llama3.STDERR.print(Tokenizer.replaceControlCharacters(model.tokenizer().decode(List.of(nextToken))));
             }
             generatedTokens.add(nextToken);
             if (onTokenGenerated != null) {
@@ -1186,7 +1188,7 @@ record Llama(Configuration configuration, Tokenizer tokenizer, Weights weights) 
         long elapsedNanos = System.nanoTime() - startNanos;
         long promptNanos = startGen - startNanos;
         long genNanos = elapsedNanos - startGen + startNanos;
-        System.err.printf("%ncontext: %d/%d prompt: %.2f tokens/s (%d) generation: %.2f tokens/s (%d)%n",
+        Llama3.STDERR.printf("%ncontext: %d/%d prompt: %.2f tokens/s (%d) generation: %.2f tokens/s (%d)%n",
                 startPosition + promptIndex + generatedTokens.size(), model.configuration().contextLength,
                 promptTokens.size() / (promptNanos / 1_000_000_000.0), promptTokens.size(),
                 generatedTokens.size() / (genNanos / 1_000_000_000.0), generatedTokens.size());
