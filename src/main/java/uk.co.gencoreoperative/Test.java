@@ -17,15 +17,7 @@ public class Test {
                 .build()
                 .parse(args);
 
-        MukelRunner runner = new MukelRunner(config.modelPath, config.temperature);
-        Response response;
-        if (config.systemPrompt != null) {
-//            response = runner.runWithResponse(config.systemPrompt, config.prompt);
-            runner.runAsStream(config.systemPrompt, config.prompt).forEach(System.out::print);
-        } else {
-//            response = runner.runWithResponse(config.prompt);
-            runner.runAsStream(config.prompt).forEach(System.out::print);
-        }
-//        System.out.println(response);
+        MukelRunner runner = new MukelRunner(config.modelPath);
+        runner.runAsStream(config).forEach(System.out::print);
     }
 }

@@ -2,15 +2,14 @@ package uk.co.gencoreoperative.runner;
 
 import static uk.co.gencoreoperative.runner.ModelType.*;
 
+import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.PrintStream;
+import java.io.StringReader;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -19,6 +18,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import mukel.qwen2.Qwen2;
+import uk.co.gencoreoperative.Config;
 import uk.co.gencoreoperative.ai.ContextWindow;
 import uk.co.gencoreoperative.ai.Response;
 import uk.co.gencoreoperative.ai.Run;
@@ -42,17 +42,11 @@ import mukel.llama3.Llama3;
  */
 public class MukelRunner implements Run {
     private final Path modelPath;
-    private final float temperature;
     private final ModelType modelType;
 
     public MukelRunner(Path modelPath) {
-        this(modelPath, 0.1f); // Based on the default from unlying runners.
-    }
-
-    public MukelRunner(Path modelPath, float temperature) {
         modelType = validateModelPath(modelPath);
         this.modelPath = modelPath;
-        this.temperature = temperature;
     }
 
     /**
@@ -106,42 +100,6 @@ public class MukelRunner implements Run {
     }
 
     /**
-     * Perform a single AI request with the provided prompt.
-     *
-     * @param prompt A non-null, possibly empty prompt.
-     * @return The output of the model if any.
-     */
-    @Override
-    public String run(@Nonnull String prompt) {
-        return runAsStream(prompt).collect(Collectors.joining());
-    }
-
-    /**
-     * Perform a single AI request with the provided prompt and return a {@link Response} object.
-     * <p>
-     * This method will provide more information about the LLM invocation for the caller.
-     *
-     * @param prompt A non-null, possibly empty prompt to send to the model.
-     * @return A {@link Response} object containing the model's output and metadata.
-     * @throws RuntimeException if the model invocation fails or an error occurs during processing.
-     */
-    @Override
-    public Response runWithResponse(@Nonnull String prompt) throws RuntimeException {
-        return invoke(buildArgs(null, prompt, temperature));
-    }
-
-    /**
-     * Perform a single AI request with the provided system and user prompts.
-     *
-     * @param system A non-null text that guides the intention of the LLM request.
-     * @param user The text provided from the user that the LLM is to respond to.
-     * @return The output of the model if any.
-     */
-    public String run(@Nonnull String system, @Nonnull String user) {
-        return runAsStream(system, user).collect(Collectors.joining());
-    }
-
-    /**
      * Perform a single AI request with the provided system and user prompts and return a {@link Response} object.
      * <p>
      * This method will provide more information about the LLM invocation for the caller.
@@ -152,42 +110,82 @@ public class MukelRunner implements Run {
      * @throws RuntimeException if the model invocation fails or an error occurs during processing.
      */
     @Override
-    public Response runWithResponse(@Nonnull String system, @Nonnull String user) throws RuntimeException {
-        return invoke(buildArgs(system, user, temperature));
+    public Response runWithResponse(@Nonnull Config options) throws RuntimeException {
+
+        BlockingQueueIterator output = new BlockingQueueIterator();
+        BlockingQueueIterator error = new BlockingQueueIterator();
+        String[] args = buildArgs(options.systemPrompt, options.prompt, options.temperature);
+
+        long start = System.currentTimeMillis();
+        getInvoker(args, output, error).run();
+        Duration duration = Duration.of(System.currentTimeMillis() - start, ChronoUnit.MILLIS);
+
+        String completeError = BlockingQueueIterator.createStream(error).collect(Collectors.joining());
+        String completeOutput = BlockingQueueIterator.createStream(output).collect(Collectors.joining());
+
+        return new Response(completeOutput, parseContextWindow(completeError), duration);
     }
 
-    public Stream<String> runAsStream(@Nonnull String prompt) {
-        return runAsStream(null, prompt);
+    private static ContextWindow parseContextWindow(String error) {
+        try (BufferedReader reader = new BufferedReader(new StringReader(error))) {
+            return reader.lines()
+                    .filter(ContextParser::isContextLine)
+                    .findFirst()
+                    .map(ContextParser::parseContext)
+                    .orElseGet(() -> new ContextWindow(0,0));
+        } catch (IOException e) {
+            throw new IllegalStateException();
+        }
     }
 
-    public Stream<String> runAsStream(@Nullable String system, @Nonnull String prompt) {
-        BlockingQueueIterator iterator = new BlockingQueueIterator();
-        String[] args = buildArgs(system, prompt, temperature);
-        RunAsync.runAsync(getInvoker(args, iterator));
-        return BlockingQueueIterator.createStream(iterator);
+    /**
+     * Perform a single AI request with the provided system and user prompts.
+     *
+     * @param system A non-null text that guides the intention of the LLM request.
+     * @param user The text provided from the user that the LLM is to respond to.
+     * @return The output of the model if any.
+     */
+    public String run(@Nonnull Config options) {
+        BlockingQueueIterator output = new BlockingQueueIterator();
+        BlockingQueueIterator error = new BlockingQueueIterator();
+        String[] args = buildArgs(options.systemPrompt, options.prompt, options.temperature);
+        RunAsync.runAsync(getInvoker(args, output, error));
+        return BlockingQueueIterator.createStream(output).collect(Collectors.joining());
     }
 
-    private Runnable getInvoker(String[] args, BlockingQueueIterator iterator) {
+    public Stream<String> runAsStream(@Nonnull Config options) {
+        BlockingQueueIterator output = new BlockingQueueIterator();
+        BlockingQueueIterator error = new BlockingQueueIterator();
+        String[] args = buildArgs(options.systemPrompt, options.prompt, options.temperature);
+        RunAsync.runAsync(getInvoker(args, output, error));
+        return BlockingQueueIterator.createStream(output);
+    }
+
+    private Runnable getInvoker(String[] args, BlockingQueueIterator output, BlockingQueueIterator error) {
         if (modelType == LLAMA3) {
             return () -> {
-                Llama3.STDOUT = QueuingOutputStream.createStream(iterator.getQueue());
+                Llama3.STDOUT = QueuingOutputStream.createStream(output.getQueue());
+                Llama3.STDERR = QueuingOutputStream.createStream(error.getQueue());
                 try {
                     Llama3.main(args);
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 } finally {
-                    iterator.setEnd();
+                    output.setEnd();
+                    error.setEnd();
                 }
             };
         } else if (modelType == QWEN2) {
             return () -> {
-                Qwen2.STDOUT = QueuingOutputStream.createStream(iterator.getQueue());
+                Qwen2.STDOUT = QueuingOutputStream.createStream(output.getQueue());
+                Qwen2.STDERR = QueuingOutputStream.createStream(error.getQueue());
                 try {
                     Qwen2.main(args);
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 } finally {
-                    iterator.setEnd();
+                    output.setEnd();
+                    error.setEnd();
                 }
             };
         }

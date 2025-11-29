@@ -12,7 +12,10 @@ import uk.co.gencoreoperative.runner.MukelRunner;
 public class Qwen2Test {
     static void main() {
         File model = new File(System.getProperty("user.dir"), "Qwen2.5-0.5B-Instruct-Q4_0.gguf");
-        MukelRunner runner = new MukelRunner(model.toPath());
-        System.out.println(runner.run("Tell me a joke"));
+        Config config = new Config();
+        config.modelPath = model.toPath();
+        config.prompt = "Tell me a joke!";
+        MukelRunner runner = new MukelRunner(config.modelPath);
+        System.out.println(runner.run(config));
     }
 }

@@ -27,7 +27,7 @@ public class GeneralKnowledgeDemo {
         for (String question : questions) {
             System.out.println(format("Question: {0}", question));
             for (MukelRunner runner : runners) {
-                System.out.println(format("{0}: {1}", runner.getModelName(), runner.run(systemPrompt, question)));
+//                System.out.println(format("{0}: {1}", runner.getModelName(), runner.run(systemPrompt, question)));
             }
             System.out.println();
         }
